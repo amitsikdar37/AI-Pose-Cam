@@ -9,6 +9,7 @@ import {
   Camera,
   Check,
   HardDrive,
+  FlipHorizontal,
 } from 'lucide-react';
 import type { CapturedPhoto, PosePreset } from '../types/camera';
 import { SkeletalOverlay } from './SkeletalOverlay';
@@ -27,32 +28,76 @@ export const PhotoPreviewModal: React.FC<PhotoPreviewModalProps> = ({
   const [useStamped, setUseStamped] = useState(true);
   const [showOverlay, setShowOverlay] = useState(false);
   const [zoomLevel, setZoomLevel] = useState<1 | 2>(1);
+  const [isFlipped, setIsFlipped] = useState(false);
 
   if (!photo) return null;
 
   const currentDisplayUrl = useStamped && photo.stampedUrl ? photo.stampedUrl : photo.url;
   const currentBlob = useStamped && photo.stampedBlob ? photo.stampedBlob : photo.blob;
 
-  const handleDownload = (stampedOption = useStamped) => {
-    const a = document.createElement('a');
+  const flipBlobHorizontally = async (blob: Blob): Promise<Blob> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      const url = URL.createObjectURL(blob);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(blob);
+          return;
+        }
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(img, 0, 0);
+        canvas.toBlob((b) => resolve(b || blob), 'image/jpeg', 0.95);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(blob);
+      };
+      img.src = url;
+    });
+  };
+
+  const handleDownload = async (stampedOption = useStamped) => {
     const isStamped = stampedOption && photo.stampedUrl;
-    a.href = isStamped ? photo.stampedUrl : photo.url;
+    let targetBlob = isStamped ? photo.stampedBlob : photo.blob;
+
+    if (isFlipped && targetBlob) {
+      targetBlob = await flipBlobHorizontally(targetBlob);
+    }
+
+    const downloadUrl = targetBlob ? URL.createObjectURL(targetBlob) : (isStamped ? photo.stampedUrl : photo.url);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
 
     const mpLabel = photo.megapixelsFormatted.replace(/\s+/g, '');
     const cameraLabel = photo.facingMode === 'user' ? 'FrontCam' : 'BackCam';
     const stampSuffix = isStamped ? '_Stamped' : '_Raw';
+    const flipSuffix = isFlipped ? '_Flipped' : '';
 
-    a.download = `AIPoseCam_${cameraLabel}_${mpLabel}_${photo.width}x${photo.height}${stampSuffix}.jpg`;
+    a.download = `AIPoseCam_${cameraLabel}_${mpLabel}_${photo.width}x${photo.height}${stampSuffix}${flipSuffix}.jpg`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    if (targetBlob && isFlipped) {
+      URL.revokeObjectURL(downloadUrl);
+    }
   };
 
   const handleShare = async () => {
-    if (navigator.share && currentBlob) {
+    let targetBlob = currentBlob;
+    if (isFlipped && targetBlob) {
+      targetBlob = await flipBlobHorizontally(targetBlob);
+    }
+
+    if (navigator.share && targetBlob) {
       try {
         const file = new File(
-          [currentBlob],
+          [targetBlob],
           `AIPoseCam_${photo.megapixelsFormatted.replace(' ', '')}.jpg`,
           { type: 'image/jpeg' }
         );
@@ -68,6 +113,7 @@ export const PhotoPreviewModal: React.FC<PhotoPreviewModalProps> = ({
       handleDownload();
     }
   };
+
 
   const formattedFileSize =
     photo.fileSizeBytes > 1024 * 1024
@@ -111,6 +157,20 @@ export const PhotoPreviewModal: React.FC<PhotoPreviewModalProps> = ({
             <span>{useStamped ? 'MP Stamp: ON' : 'MP Stamp: OFF'}</span>
           </button>
 
+          {/* Flip Photo Horizontal Toggle */}
+          <button
+            onClick={() => setIsFlipped(!isFlipped)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+              isFlipped
+                ? 'bg-amber-500 text-black font-bold shadow-md shadow-amber-500/20'
+                : 'glass-pill text-white/80 hover:text-white'
+            }`}
+            title="Flip / Mirror photo horizontally"
+          >
+            <FlipHorizontal className="w-3.5 h-3.5" />
+            <span className="hidden xs:inline">{isFlipped ? 'Flipped' : 'Flip'}</span>
+          </button>
+
           {/* AI Guide Wireframe Overlay */}
           <button
             onClick={() => setShowOverlay(!showOverlay)}
@@ -145,8 +205,11 @@ export const PhotoPreviewModal: React.FC<PhotoPreviewModalProps> = ({
           <img
             src={currentDisplayUrl}
             alt="High-resolution capture"
-            className="max-h-[68vh] w-auto object-contain rounded-xl shadow-2xl border border-white/10"
+            className={`max-h-[68vh] w-auto object-contain rounded-xl shadow-2xl border border-white/10 transition-transform duration-200 ${
+              isFlipped ? '-scale-x-100' : ''
+            }`}
           />
+
 
           {/* AI Skeleton Overlay on captured image */}
           {showOverlay && currentPose && (

@@ -7,7 +7,9 @@ import type {
   CapturedPhoto,
   PoseLandmarks,
   PosePreset,
+  ResolutionMode,
 } from './types/camera';
+
 import { DEFAULT_POSES } from './data/defaultPoses';
 import { cameraService } from './services/cameraService';
 import { poseDetectionService } from './services/poseDetectionService';
@@ -19,6 +21,7 @@ import { CameraHUD } from './components/CameraHUD';
 import { PhotoPreviewModal } from './components/PhotoPreviewModal';
 import { PoseSelectorModal } from './components/PoseSelectorModal';
 import { SettingsModal } from './components/SettingsModal';
+import { PoseReferencePIP } from './components/PoseReferencePIP';
 
 export const App: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -55,8 +58,9 @@ export const App: React.FC = () => {
   const [showPreview, setShowPreview] = useState(false);
   const [showGrid, setShowGrid] = useState(false);
   const [autoCapture, setAutoCapture] = useState(false);
-  const [alignmentSensitivity, setAlignmentSensitivity] = useState(78);
-  const [guideOpacity, setGuideOpacity] = useState(0.85);
+  const [alignmentSensitivity, setAlignmentSensitivity] = useState(75);
+  const [guideOpacity, setGuideOpacity] = useState(0.90);
+  const [guideMode, setGuideMode] = useState<'silhouette' | 'hybrid' | 'skeletal'>('silhouette');
   const [autoCaptureCountdown, setAutoCaptureCountdown] = useState<number | null>(null);
 
   // Captured Photos History
@@ -199,14 +203,20 @@ export const App: React.FC = () => {
     };
   }, [currentPose, alignmentSensitivity]);
 
+  const [isCapturingState, setIsCapturingState] = useState(false);
+  const isCapturingRef = useRef(false);
+
   // 4. Capture Full Sensor / High-Resolution Photo with Actual Megapixels Stamp
   const handleCapture = useCallback(async () => {
-    if (!videoRef.current) return;
+    if (!videoRef.current || isCapturingRef.current) return;
+    isCapturingRef.current = true;
+    setIsCapturingState(true);
 
-    // Visual shutter flash & mechanical shutter audio
+    // Visual shutter flash, haptics & mechanical shutter audio
     setShutterFlashing(true);
     playShutterSound();
-    setTimeout(() => setShutterFlashing(false), 300);
+    triggerHaptic('heavy');
+    setTimeout(() => setShutterFlashing(false), 250);
 
     try {
       const result = await cameraService.captureFullQualityPhoto(videoRef.current);
@@ -222,6 +232,7 @@ export const App: React.FC = () => {
         alignment.score,
         currentPose?.title || 'AI Director Pose'
       );
+
 
       const newPhoto: CapturedPhoto = {
         id: `photo_${Date.now()}`,
@@ -239,7 +250,7 @@ export const App: React.FC = () => {
         timestamp: Date.now(),
         isFullSensor: result.isFullSensor,
         poseTitle: currentPose?.title || 'AI Director Photo',
-        fileSizeBytes: result.blob.size,
+        fileSizeBytes: stampedBlob.size || result.blob.size,
       };
 
       setCapturedPhotos((prev) => [newPhoto, ...prev]);
@@ -258,6 +269,9 @@ export const App: React.FC = () => {
       setShowPreview(true);
     } catch (err) {
       console.error('Photo capture error:', err);
+    } finally {
+      isCapturingRef.current = false;
+      setIsCapturingState(false);
     }
   }, [alignment, currentPose]);
 
@@ -282,6 +296,59 @@ export const App: React.FC = () => {
     }
   }, [alignment.isAligned, autoCapture, autoCaptureCountdown, handleCapture, showPreview]);
 
+  // Hardware Shutter Keys: Smartphone Volume Up/Down, Bluetooth Selfie Sticks, Laptop Spacebar/Enter
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if user is typing in settings or modal text inputs
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        (e.target as HTMLElement)?.isContentEditable
+      ) {
+        return;
+      }
+
+      const key = e.key;
+      const code = e.code;
+
+      // Smartphone Hardware Volume Keys, Bluetooth Selfie Sticks, Space, Enter, Camera key
+      if (
+        key === 'AudioVolumeUp' ||
+        key === 'AudioVolumeDown' ||
+        key === 'VolumeUp' ||
+        key === 'VolumeDown' ||
+        code === 'AudioVolumeUp' ||
+        code === 'AudioVolumeDown' ||
+        key === 'Camera' ||
+        code === 'Camera' ||
+        key === ' ' || // Spacebar for laptops
+        code === 'Space' ||
+        key === 'Enter' ||
+        code === 'Enter'
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleCapture();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+
+    // Support Bluetooth Selfie Sticks / Media controls via MediaSession
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.setActionHandler('play', () => handleCapture());
+        navigator.mediaSession.setActionHandler('pause', () => handleCapture());
+        navigator.mediaSession.setActionHandler('nexttrack', () => handleCapture());
+        navigator.mediaSession.setActionHandler('previoustrack', () => handleCapture());
+      } catch {}
+    }
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, { capture: true });
+    };
+  }, [handleCapture]);
+
   // 6. Camera Controls: Front / Back Camera Switch
   const handleSwitchCamera = async () => {
     if (!videoRef.current || cameraSwitching) return;
@@ -303,6 +370,21 @@ export const App: React.FC = () => {
     setTorchActive(state);
     triggerHaptic('light');
   };
+
+  const handleToggleResolutionMode = async () => {
+    const current = sensorInfo?.resolutionMode || '32mp';
+    const nextMode: ResolutionMode = current === '32mp' ? '4mp' : current === '4mp' ? 'auto' : '32mp';
+    const updated = await cameraService.setResolutionMode(nextMode);
+    setSensorInfo(updated);
+    triggerHaptic('light');
+  };
+
+  const handleSetResolutionMode = async (mode: ResolutionMode) => {
+    const updated = await cameraService.setResolutionMode(mode);
+    setSensorInfo(updated);
+    triggerHaptic('light');
+  };
+
 
   // Touch to focus handler
   const handleTouchFocus = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
@@ -336,13 +418,15 @@ export const App: React.FC = () => {
           }`}
         />
 
-        {/* 2. AI Skeletal Overlay (Target & Live Detection Wireframe) */}
+        {/* 2. AI Silhouette & Skeletal Overlay (Target & Live Detection Wireframe) */}
         <SkeletalOverlay
-          targetLandmarks={currentPose?.landmarks || null}
+          currentPose={currentPose}
           liveLandmarks={liveLandmarks}
           alignment={alignment}
           isMirrored={sensorInfo?.facingMode === 'user'}
           opacity={guideOpacity}
+          guideMode={guideMode}
+          videoElement={videoRef.current}
         />
 
         {/* 3. Touch Focus Ring */}
@@ -387,7 +471,7 @@ export const App: React.FC = () => {
                 </button>
                 <button
                   onClick={handlePerformAnalysis}
-                  className="px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 active:scale-95 text-black font-bold text-[11px] transition-all"
+                  className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 active:scale-95 text-black font-bold text-[11px] transition-all"
                 >
                   Retry
                 </button>
@@ -429,9 +513,10 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      {/* 7. Mobile Camera HUD Controls with Front/Back Switcher */}
+      {/* 7. Mobile Camera HUD Controls with Front/Back Switcher & Posture Bar */}
       <CameraHUD
         currentPose={currentPose}
+        onSelectPose={(pose) => setCurrentPose(pose)}
         alignment={alignment}
         sensorInfo={sensorInfo}
         torchActive={torchActive}
@@ -448,6 +533,18 @@ export const App: React.FC = () => {
         onToggleGrid={() => setShowGrid(!showGrid)}
         autoCaptureCountdown={autoCaptureCountdown}
         cameraSwitching={cameraSwitching}
+        guideMode={guideMode}
+        onToggleGuideMode={() =>
+          setGuideMode((prev) => (prev === 'silhouette' ? 'hybrid' : prev === 'hybrid' ? 'skeletal' : 'silhouette'))
+        }
+        isCapturing={isCapturingState}
+        onToggleResolutionMode={handleToggleResolutionMode}
+      />
+
+      {/* Floating Draggable Picture-In-Picture Reference Card */}
+      <PoseReferencePIP
+        currentPose={currentPose}
+        onOpenGallery={() => setShowPreview(true)}
       />
 
       {/* 8. Full Resolution Photo Review Modal with Actual Megapixel Verification */}
@@ -481,8 +578,10 @@ export const App: React.FC = () => {
           guideOpacity={guideOpacity}
           onSetGuideOpacity={setGuideOpacity}
           onClose={() => setShowSettings(false)}
+          onSetResolutionMode={handleSetResolutionMode}
         />
       )}
+
     </div>
   );
 };

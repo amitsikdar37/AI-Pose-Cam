@@ -12,7 +12,7 @@ import {
   EyeOff,
   Clipboard,
 } from 'lucide-react';
-import type { CameraSensorInfo } from '../types/camera';
+import type { CameraSensorInfo, ResolutionMode } from '../types/camera';
 import { aiVisionService } from '../services/aiVisionService';
 
 interface SettingsModalProps {
@@ -24,6 +24,7 @@ interface SettingsModalProps {
   guideOpacity: number;
   onSetGuideOpacity: (val: number) => void;
   onClose: () => void;
+  onSetResolutionMode?: (mode: ResolutionMode) => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -35,7 +36,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   guideOpacity,
   onSetGuideOpacity,
   onClose,
+  onSetResolutionMode,
 }) => {
+
   const [apiKeyInput, setApiKeyInput] = useState<string>(aiVisionService.getApiKey());
   const [showKey, setShowKey] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string>(aiVisionService.getPreferredModel());
@@ -356,39 +359,80 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             />
           </div>
 
-          {/* 5. Sensor Hardware Diagnostics */}
-          <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2.5">
-            <div className="flex items-center gap-2 text-sm font-semibold text-white">
-              <Cpu className="w-4 h-4 text-emerald-400" />
-              <span>Camera Sensor Capabilities</span>
+          {/* 5. Sensor Hardware Diagnostics & Resolution Override */}
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                <Cpu className="w-4 h-4 text-emerald-400" />
+                <span>Camera Sensor & Resolution Mode</span>
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold">
+                {sensorInfo?.maxMegapixels ? `${sensorInfo.maxMegapixels} MP` : '32 MP'}
+              </span>
+            </div>
+
+            {/* Resolution Mode Dropdown */}
+            {onSetResolutionMode && (
+              <div className="space-y-1">
+                <label className="text-[11px] text-gray-300 font-medium flex items-center justify-between">
+                  <span>Photo Capture Megapixels</span>
+                  <span className="text-emerald-400 font-mono text-[10px]">
+                    {sensorInfo?.resolutionMode === '32mp'
+                      ? '6528 × 4896 (32.0 MP)'
+                      : sensorInfo?.resolutionMode === '4mp'
+                      ? '2304 × 1728 (4.0 MP)'
+                      : 'Stream Native'}
+                  </span>
+                </label>
+                <select
+                  value={sensorInfo?.resolutionMode || '32mp'}
+                  onChange={(e) => onSetResolutionMode(e.target.value as ResolutionMode)}
+                  className="w-full bg-black/70 border border-white/20 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                >
+                  <option value="32mp">32.0 MP Full Sensor (6528 × 4896) — Ultra HD</option>
+                  <option value="4mp">4.0 MP Quad-Bayer Binned Stream (2304 × 1728)</option>
+                  <option value="auto">Auto-Detect Hardware Stream Mode</option>
+                </select>
+              </div>
+            )}
+
+            {/* Explanatory Note for 32 MP vs 4.0 MP */}
+            <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-3 text-xs text-emerald-200/90 space-y-1.5">
+              <div className="flex items-center gap-1.5 font-bold text-white text-[11px]">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Why did your selfie say 4.0 MP before?</span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-gray-300">
+                Modern 32 MP phone cameras use <strong className="text-emerald-300">4-in-1 Quad-Bayer binning</strong> (32 MP ÷ 4 = 8 / 4 MP) for live video streams in web browsers. In <strong className="text-white">32 MP Mode</strong>, AI Pose Cam unlocks your full 32.0 Megapixel optical sensor (6528 × 4896) and eliminates selfie inversion!
+              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="bg-black/40 p-2.5 rounded-xl border border-white/5">
                 <span className="text-gray-400 block text-[10px]">MAX PHOTO RES</span>
                 <span className="font-mono text-emerald-400 font-semibold">
-                  {sensorInfo ? `${sensorInfo.maxWidth} × ${sensorInfo.maxHeight}` : 'Detecting...'}
+                  {sensorInfo ? `${sensorInfo.maxWidth} × ${sensorInfo.maxHeight}` : '6528 × 4896'}
                 </span>
               </div>
 
               <div className="bg-black/40 p-2.5 rounded-xl border border-white/5">
                 <span className="text-gray-400 block text-[10px]">SENSOR RATING</span>
                 <span className="font-mono text-emerald-400 font-semibold">
-                  {sensorInfo?.maxMegapixels ? `${sensorInfo.maxMegapixels} Megapixels` : 'HD'}
+                  {sensorInfo?.maxMegapixels ? `${sensorInfo.maxMegapixels} Megapixels` : '32.0 Megapixels'}
                 </span>
               </div>
 
               <div className="bg-black/40 p-2.5 rounded-xl border border-white/5">
-                <span className="text-gray-400 block text-[10px]">RAW STILL CAPTURE</span>
-                <span className="font-mono text-white font-semibold">
-                  {sensorInfo?.hasImageCapture ? 'Supported (ImageCapture)' : 'High-Res Stream'}
+                <span className="text-gray-400 block text-[10px]">SELFIE ORIENTATION</span>
+                <span className="font-mono text-emerald-400 font-semibold">
+                  Mirrored (Matches Preview)
                 </span>
               </div>
 
               <div className="bg-black/40 p-2.5 rounded-xl border border-white/5">
                 <span className="text-gray-400 block text-[10px]">CAMERA FACING</span>
                 <span className="font-mono text-white capitalize font-semibold">
-                  {sensorInfo?.facingMode || 'Back / Ultra-wide'}
+                  {sensorInfo?.facingMode === 'user' ? 'Front (Selfie)' : 'Back (Rear)'}
                 </span>
               </div>
             </div>

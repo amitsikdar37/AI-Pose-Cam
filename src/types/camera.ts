@@ -30,11 +30,13 @@ export interface PosePreset {
   id: string;
   title: string;
   vibe: string;
-  category: 'Casual' | 'Editorial' | 'Portrait' | 'Dynamic' | 'Seated' | 'Streetwear';
+  category: 'Downtown' | 'Selfie' | 'Casual' | 'Stylish' | 'Seated' | 'Standing' | 'Editorial' | 'Portrait' | 'Dynamic' | 'Streetwear';
   framing: 'full_body' | 'upper_body' | 'seated';
   directionTip: string;
   reasoning: string;
   landmarks: PoseLandmarks;
+  referenceImage?: string;
+  silhouetteSvgPaths?: string[];
 }
 
 export interface SceneAnalysisResponse {
@@ -75,6 +77,8 @@ export interface CapturedPhoto {
   fileSizeBytes: number;
 }
 
+export type ResolutionMode = '32mp' | '48mp' | '50mp' | '12mp' | '4mp' | 'auto';
+
 export interface CameraSensorInfo {
   maxWidth: number;
   maxHeight: number;
@@ -86,4 +90,7 @@ export interface CameraSensorInfo {
   zoomMin?: number;
   zoomMax?: number;
   zoomCurrent?: number;
+  resolutionMode?: ResolutionMode;
+  isQuadBayerBinned?: boolean;
 }
+

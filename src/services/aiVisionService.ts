@@ -467,6 +467,22 @@ Return ONLY a raw JSON object with this exact structure (NO markdown formatting,
 
     const shortModelName = modelUsed.replace('gemini-', '').toUpperCase();
 
+    // Intelligently match the closest reference photo from curated library based on keywords
+    const textBlob = `${data.poseTitle || ''} ${data.vibe || ''} ${data.directionTip || ''} ${data.framing || ''}`.toLowerCase();
+    let matchedPhoto: string | undefined = undefined;
+
+    if (textBlob.includes('lean') || textBlob.includes('wall') || textBlob.includes('street')) {
+      matchedPhoto = DEFAULT_POSES.find((p) => p.id === 'downtown_lean')?.referenceImage;
+    } else if (textBlob.includes('sit') || textBlob.includes('step') || textBlob.includes('bench') || textBlob.includes('chair')) {
+      matchedPhoto = DEFAULT_POSES.find((p) => p.id === 'downtown_steps')?.referenceImage;
+    } else if (textBlob.includes('selfie') || textBlob.includes('hair') || textBlob.includes('head') || textBlob.includes('face')) {
+      matchedPhoto = DEFAULT_POSES.find((p) => p.id === 'selfie_hair')?.referenceImage;
+    } else if (textBlob.includes('hip') || textBlob.includes('stand') || textBlob.includes('casual')) {
+      matchedPhoto = DEFAULT_POSES.find((p) => p.id === 'hands_hips')?.referenceImage;
+    } else {
+      matchedPhoto = DEFAULT_POSES.find((p) => p.id === 'editorial_collar')?.referenceImage;
+    }
+
     return {
       id: `ai_${Date.now()}`,
       title: data.poseTitle || 'Bespoke AI Pose',
@@ -475,6 +491,7 @@ Return ONLY a raw JSON object with this exact structure (NO markdown formatting,
       framing: data.framing || 'upper_body',
       directionTip: data.directionTip || 'Follow the glowing green skeletal guide.',
       reasoning: data.sceneDescription ? `${data.sceneDescription} [${shortModelName}]` : `Bespoke pose direct from ${shortModelName}`,
+      referenceImage: matchedPhoto,
       landmarks,
     };
   }

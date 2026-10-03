@@ -1,23 +1,24 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Camera,
   RotateCcw,
   Zap,
   ZapOff,
   Settings,
-  Sparkles,
   Grid,
   CheckCircle2,
   RefreshCw,
-  Sliders,
-  FlipHorizontal,
+  SlidersHorizontal,
   ChevronDown,
   ChevronUp,
+  User,
 } from 'lucide-react';
 import type { AlignmentResult, CameraSensorInfo, CapturedPhoto, PosePreset } from '../types/camera';
+import { PostureBar } from './PostureBar';
 
 interface CameraHUDProps {
   currentPose: PosePreset | null;
+  onSelectPose: (pose: PosePreset) => void;
   alignment: AlignmentResult;
   sensorInfo: CameraSensorInfo | null;
   torchActive: boolean;
@@ -34,10 +35,15 @@ interface CameraHUDProps {
   onToggleGrid: () => void;
   autoCaptureCountdown: number | null;
   cameraSwitching: boolean;
+  guideMode: 'silhouette' | 'hybrid' | 'skeletal';
+  onToggleGuideMode: () => void;
+  isCapturing?: boolean;
+  onToggleResolutionMode?: () => void;
 }
 
 export const CameraHUD: React.FC<CameraHUDProps> = ({
   currentPose,
+  onSelectPose,
   alignment,
   sensorInfo,
   torchActive,
@@ -54,13 +60,33 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({
   onToggleGrid,
   autoCaptureCountdown,
   cameraSwitching,
+  guideMode,
+  onToggleGuideMode,
+  isCapturing = false,
+  onToggleResolutionMode,
 }) => {
+
   const isAligned = alignment.isAligned;
   const score = alignment.score;
   const isFront = sensorInfo?.facingMode === 'user';
 
   const [spinFlip, setSpinFlip] = useState(false);
   const [showFullTips, setShowFullTips] = useState(false);
+  const lastCaptureTimeRef = useRef(0);
+
+  const handleShutterTrigger = (e: React.SyntheticEvent) => {
+    // If it's a touch event, prevent default to eliminate 300ms mobile click delay & ghost touches
+    if ('touches' in e || 'changedTouches' in e) {
+      e.preventDefault();
+    }
+    e.stopPropagation();
+
+    const now = Date.now();
+    if (now - lastCaptureTimeRef.current < 400) return; // Debounce rapid taps
+    lastCaptureTimeRef.current = now;
+
+    onCapture();
+  };
 
   const handleFlipClick = () => {
     setSpinFlip(true);
@@ -69,7 +95,7 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({
   };
 
   return (
-    <div className="absolute inset-0 flex flex-col justify-between pointer-events-none z-20 p-3 sm:p-4 select-none safe-area-inset">
+    <div className="absolute inset-0 flex flex-col justify-between pointer-events-none z-20 select-none safe-area-inset">
       {/* 1. Rule of Thirds Grid (Optional) */}
       {showGrid && (
         <div className="absolute inset-0 pointer-events-none opacity-20">
@@ -87,28 +113,36 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({
         </div>
       )}
 
-      {/* 2. Top Area: Status Bar + Pinned Pose Title (Kept at the very top, NEVER blocking center view) */}
-      <div className="flex flex-col gap-2 pointer-events-auto">
-        {/* Top Status Row */}
+      {/* 2. Top Header Bar (Resolution, Alignment Pill, Guide Mode Toggle, Settings) */}
+      <div className="p-3 sm:p-4 flex flex-col gap-2 pointer-events-auto">
         <div className="flex items-center justify-between gap-1.5 sm:gap-2">
-          {/* Sensor resolution & Active Camera badge */}
+          {/* Resolution Badge & Flip Camera */}
           <div className="flex items-center gap-1.5">
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full glass-pill text-xs font-mono tracking-wider text-emerald-400 border border-emerald-500/30">
+            <button
+              onClick={onToggleResolutionMode}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full glass-pill text-xs font-mono tracking-wider text-emerald-400 border border-emerald-500/30 hover:border-emerald-400/60 active:scale-95 transition-all cursor-pointer"
+              title="Tap to toggle sensor resolution mode: 32 MP Full Sensor / 4 MP Binned / Auto"
+            >
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
               <span className="font-bold">
-                {sensorInfo?.maxMegapixels ? `${sensorInfo.maxMegapixels} MP` : 'RAW'}
+                {sensorInfo?.maxMegapixels ? `${sensorInfo.maxMegapixels} MP` : '32 MP'}
               </span>
               <span className="text-[10px] text-gray-300 font-sans hidden sm:inline">
                 {isFront ? 'FRONT' : 'BACK'}
               </span>
-            </div>
+              {sensorInfo?.resolutionMode === '32mp' && (
+                <span className="text-[9px] px-1 rounded bg-emerald-500/25 text-emerald-300 font-sans font-bold">
+                  HD
+                </span>
+              )}
+            </button>
 
-            {/* Quick Lens Switch pill */}
+
             <button
               onClick={handleFlipClick}
               disabled={cameraSwitching}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-full glass-pill text-[11px] font-semibold text-gray-300 hover:text-white transition-all border border-white/10 active:scale-95"
-              title="Tap to toggle Front/Back Camera"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full glass-pill text-[11px] font-semibold text-gray-300 hover:text-white transition-all border border-white/10 active:scale-95"
+              title="Flip Camera (Front / Back)"
             >
               <RotateCcw
                 className={`w-3.5 h-3.5 text-emerald-400 transition-transform duration-500 ${
@@ -121,12 +155,12 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({
 
           {/* Dynamic Alignment Score Pill */}
           <div
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full glass-pill text-xs font-bold transition-all duration-300 ${
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full glass-pill text-xs font-bold transition-all duration-300 ${
               isAligned
                 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400 glow-green scale-105'
                 : score >= 65
                 ? 'bg-amber-500/20 text-amber-300 border-amber-400'
-                : 'bg-black/60 text-sky-300 border-white/10'
+                : 'bg-black/60 text-amber-200 border-white/10'
             }`}
           >
             {isAligned ? (
@@ -140,15 +174,29 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({
             <span>{score}% ALIGNED</span>
           </div>
 
-          {/* Quick Action Buttons */}
+          {/* Action Buttons: Guide Style Toggle, Grid, Flash, Settings */}
           <div className="flex items-center gap-1">
+            {/* Guide Mode Toggle: Silhouette (Yellow outline) vs Skeletal */}
+            <button
+              onClick={onToggleGuideMode}
+              className={`px-2 py-1 rounded-full glass-pill text-[10px] font-semibold flex items-center gap-1 transition-colors ${
+                guideMode === 'silhouette'
+                  ? 'text-amber-300 border-amber-400/40 bg-amber-500/10'
+                  : 'text-sky-300 border-sky-400/40 bg-sky-500/10'
+              }`}
+              title="Toggle Silhouette / Skeletal Guide"
+            >
+              <User className="w-3 h-3" />
+              <span className="capitalize">{guideMode}</span>
+            </button>
+
             {sensorInfo?.torchAvailable && (
               <button
                 onClick={onToggleTorch}
-                className={`p-2 rounded-full glass-pill transition-colors ${
+                className={`p-1.5 rounded-full glass-pill transition-colors ${
                   torchActive ? 'text-amber-400 bg-amber-500/20' : 'text-white/80 hover:text-white'
                 }`}
-                title="Toggle Flash / Torch"
+                title="Toggle Torch"
               >
                 {torchActive ? <Zap className="w-4 h-4 fill-amber-400" /> : <ZapOff className="w-4 h-4" />}
               </button>
@@ -156,56 +204,44 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({
 
             <button
               onClick={onToggleGrid}
-              className={`p-2 rounded-full glass-pill transition-colors ${
+              className={`p-1.5 rounded-full glass-pill transition-colors ${
                 showGrid ? 'text-emerald-400 bg-emerald-500/20' : 'text-white/80 hover:text-white'
               }`}
-              title="Toggle Grid (Rule of Thirds)"
+              title="Toggle Grid"
             >
               <Grid className="w-4 h-4" />
             </button>
 
             <button
+              onClick={onOpenPoseSelector}
+              className="p-1.5 rounded-full glass-pill text-white/80 hover:text-white transition-colors"
+              title="Full Pose Library"
+            >
+              <SlidersHorizontal className="w-4 h-4" />
+            </button>
+
+            <button
               onClick={onOpenSettings}
-              className="p-2 rounded-full glass-pill text-white/80 hover:text-white transition-colors"
-              title="Settings & Gemini Key"
+              className="p-1.5 rounded-full glass-pill text-white/80 hover:text-white transition-colors"
+              title="Settings"
             >
               <Settings className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Pinned Pose Title Banner (Right below top status row, completely clear of face/torso) */}
-        {currentPose && (
-          <div className="flex items-center justify-center">
-            <button
-              onClick={onOpenPoseSelector}
-              className="px-3 py-1 rounded-full glass-pill flex items-center gap-1.5 shadow-md border border-white/15 hover:border-emerald-500/40 transition-all text-xs active:scale-95"
-              title="Tap to change pose preset"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-              <span className="font-semibold text-white truncate max-w-[180px] xs:max-w-[240px]">
-                {currentPose.title}
-              </span>
-              <span className="text-[9px] uppercase tracking-wider text-emerald-300 bg-emerald-950/70 px-1.5 py-0.5 rounded-full border border-emerald-500/30">
-                {currentPose.category}
-              </span>
-            </button>
-          </div>
-        )}
-
         {/* Camera Switching Toast */}
         {cameraSwitching && (
           <div className="flex justify-center animate-in fade-in slide-in-from-top-2 duration-200">
             <div className="px-3 py-1 rounded-full bg-emerald-500/90 text-black font-semibold text-xs flex items-center gap-1.5 shadow-xl">
               <RefreshCw className="w-3 h-3 animate-spin" />
-              <span>Switching to {isFront ? 'Front' : 'Back'} Camera...</span>
+              <span>Switching Camera...</span>
             </div>
           </div>
         )}
       </div>
 
-      {/* 3. Center Screen is 100% CLEAR for uninhibited subject framing and skeletal alignment! */}
-      {/* Auto capture countdown overlay (non-intrusive) */}
+      {/* Auto capture countdown overlay */}
       {autoCaptureCountdown !== null && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
           <div className="text-8xl font-black text-emerald-400 drop-shadow-[0_0_35px_rgba(16,185,129,0.95)] animate-ping">
@@ -214,158 +250,125 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({
         </div>
       )}
 
-      {/* 4. Bottom Controls Section: Instructions + Action Bar + Shutter */}
-      <div className="flex flex-col gap-2.5 pointer-events-auto">
-        {/* Dynamic Pose Coaching Pill (Positioned right above bottom toolbar, completely out of the face area!) */}
-        <div className="flex flex-col items-center pointer-events-none">
+      {/* 4. Bottom Controls Section: Feedback + Posture Carousel + Shutter Bar */}
+      <div className="flex flex-col gap-1 pointer-events-auto">
+        {/* Dynamic Pose Coaching Pill */}
+        <div className="flex flex-col items-center pointer-events-none px-3">
           <div
             onClick={() => setShowFullTips(!showFullTips)}
-            className={`pointer-events-auto cursor-pointer px-3.5 py-1.5 rounded-2xl glass-panel max-w-[94%] transition-all duration-300 shadow-xl flex flex-col gap-0.5 ${
+            className={`pointer-events-auto cursor-pointer px-3 py-1 rounded-full glass-panel max-w-[94%] transition-all duration-300 shadow-xl flex items-center gap-2 ${
               isAligned
-                ? 'border-emerald-500/80 bg-emerald-950/85 text-emerald-200 glow-green'
-                : 'border-white/15 bg-black/80 text-gray-200'
+                ? 'border-emerald-500/80 bg-emerald-950/90 text-emerald-200 glow-green'
+                : 'border-amber-400/40 bg-black/85 text-amber-200'
             }`}
           >
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-bold tracking-wide">
-                  {isAligned ? '✨ ' : '👉 '}{alignment.primaryFeedback}
-                </span>
-              </div>
-              {currentPose?.directionTip && !isAligned && (
-                <div className="text-gray-400 hover:text-white p-0.5">
-                  {showFullTips ? (
-                    <ChevronDown className="w-3.5 h-3.5" />
-                  ) : (
-                    <ChevronUp className="w-3.5 h-3.5" />
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Expandable / Compact Tip Text */}
+            <span className="text-[11px] font-bold tracking-wide">
+              {isAligned ? '✨ ' : '👉 '}{alignment.primaryFeedback}
+            </span>
             {currentPose?.directionTip && !isAligned && (
-              <div
-                className={`text-[11px] text-gray-300 transition-all duration-200 ${
-                  showFullTips ? 'line-clamp-none pt-0.5' : 'line-clamp-1 max-w-[280px] xs:max-w-[340px]'
-                }`}
-              >
-                💡 {currentPose.directionTip}
+              <div className="text-gray-400 hover:text-white p-0.5">
+                {showFullTips ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
               </div>
             )}
           </div>
+          {currentPose?.directionTip && showFullTips && !isAligned && (
+            <div className="pointer-events-auto mt-1 px-3 py-1.5 rounded-xl bg-black/90 border border-white/10 text-[11px] text-gray-200 max-w-xs text-center shadow-lg animate-in fade-in duration-150">
+              💡 {currentPose.directionTip}
+            </div>
+          )}
         </div>
 
-        {/* Quick Toolbar: Analyze Scene & Choose Pose */}
-        <div className="flex items-center justify-center gap-2">
-          <button
-            onClick={onAnalyzeScene}
-            disabled={isAnalyzing}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full glass-panel text-xs font-medium text-emerald-300 hover:text-emerald-200 hover:bg-emerald-900/30 transition-all border border-emerald-500/40 shadow-lg active:scale-95 disabled:opacity-50"
-          >
-            {isAnalyzing ? (
-              <>
-                <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-                <span>Analyzing Scene...</span>
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                <span>AI Analyze Scene</span>
-              </>
-            )}
-          </button>
+        {/* 5. Horizontal Posture Catalog Carousel (Exact Match to User Reference Screenshots!) */}
+        <PostureBar
+          currentPose={currentPose}
+          onSelectPose={onSelectPose}
+          onAnalyzeScene={onAnalyzeScene}
+          isAnalyzing={isAnalyzing}
+        />
 
-          <button
-            onClick={onOpenPoseSelector}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full glass-panel text-xs font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all border border-white/20 shadow-lg active:scale-95"
-          >
-            <Sliders className="w-3.5 h-3.5 text-sky-400" />
-            <span>Pose Guide</span>
-          </button>
-        </div>
-
-        {/* Main Shutter Row */}
-        <div className="flex items-center justify-around px-2 sm:px-4 pb-1">
-          {/* 1. Left: Gallery Thumbnail */}
-          <div className="w-16 h-16 flex items-center justify-center">
+        {/* 6. Main Shutter & Hardware Controls Row */}
+        <div className="bg-black/90 px-4 py-2 flex items-center justify-around border-t border-white/5">
+          {/* Gallery Button */}
+          <div className="w-14 h-14 flex items-center justify-center">
             {lastPhoto ? (
               <button
                 onClick={onOpenGallery}
-                className="w-13 h-13 rounded-2xl overflow-hidden border-2 border-emerald-400/80 shadow-md active:scale-90 transition-transform relative group"
-                title="View Captured Photo"
+                className="w-12 h-12 rounded-2xl overflow-hidden border-2 border-emerald-400/80 shadow-md active:scale-90 transition-transform relative group"
+                title="View Gallery"
               >
-                <img
-                  src={lastPhoto.url}
-                  alt="Last capture"
-                  className="w-full h-full object-cover"
-                />
-                <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent" />
-                <span className="absolute bottom-0.5 right-1 text-[8px] font-mono font-bold bg-black/75 text-emerald-300 px-1 rounded">
+                <img src={lastPhoto.url} alt="Last capture" className="w-full h-full object-cover" />
+                <span className="absolute bottom-0.5 right-0.5 text-[7px] font-mono font-bold bg-black/80 text-emerald-300 px-0.5 rounded">
                   {lastPhoto.megapixelsFormatted}
                 </span>
               </button>
             ) : (
-              <div className="w-12 h-12 rounded-2xl border border-white/20 glass-pill flex items-center justify-center opacity-40">
-                <Camera className="w-5 h-5 text-gray-400" />
+              <div className="w-11 h-11 rounded-2xl border border-white/20 glass-pill flex items-center justify-center opacity-40">
+                <Camera className="w-4 h-4 text-gray-400" />
               </div>
             )}
           </div>
 
-          {/* 2. Center: Ergonomic Shutter Button */}
-          <div className="relative flex items-center justify-center">
-            {/* Outer alignment pulsating ring */}
+          {/* Shutter Button with Pulsing Gold/Green Alignment Ring */}
+          <div className="relative flex flex-col items-center justify-center">
+            {/* Outer pulsating ring */}
             <div
-              className={`absolute w-22 h-22 rounded-full border-2 transition-all duration-500 ${
+              className={`absolute w-20 h-20 rounded-full border-2 transition-all duration-300 pointer-events-none select-none ${
                 isAligned
-                  ? 'border-emerald-400 animate-pulse scale-105 glow-green'
-                  : 'border-white/30'
+                  ? 'border-emerald-400 animate-pulse scale-110 glow-green'
+                  : 'border-amber-400/50'
               }`}
             />
 
-            {/* Inner Shutter trigger */}
+            {/* Inner Shutter button */}
             <button
-              onClick={onCapture}
-              className={`w-18 h-18 rounded-full flex items-center justify-center transition-all duration-200 active:scale-90 shadow-2xl ${
-                isAligned
-                  ? 'bg-gradient-to-tr from-emerald-500 to-green-300 text-black border-4 border-white glow-green animate-pulse'
-                  : 'bg-white text-gray-900 border-4 border-black/40 hover:bg-gray-100'
+              type="button"
+              onTouchStart={handleShutterTrigger}
+              onPointerDown={(e) => {
+                if (e.pointerType !== 'touch') {
+                  handleShutterTrigger(e);
+                }
+              }}
+              onClick={handleShutterTrigger}
+              className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-150 active:scale-90 shadow-2xl relative z-10 cursor-pointer touch-manipulation select-none ${
+                isCapturing
+                  ? 'bg-emerald-400 text-black scale-95 ring-4 ring-emerald-300'
+                  : isAligned
+                  ? 'bg-gradient-to-tr from-emerald-500 to-green-300 text-black border-4 border-white glow-green'
+                  : 'bg-white text-gray-900 border-4 border-amber-400/60 hover:bg-gray-100'
               }`}
-              title="Capture Full Sensor Photo"
+              title="Capture Photo (Volume Up 🔊 / Spacebar)"
             >
               <div
-                className={`w-15 h-15 rounded-full flex items-center justify-center transition-colors ${
+                className={`w-13 h-13 rounded-full flex items-center justify-center pointer-events-none transition-colors ${
                   isAligned ? 'bg-emerald-400' : 'bg-transparent'
                 }`}
               >
                 <Camera
-                  className={`w-7 h-7 transition-colors ${
-                    isAligned ? 'text-black stroke-[2.5]' : 'text-gray-900'
+                  className={`w-6 h-6 transition-colors ${
+                    isCapturing
+                      ? 'animate-spin text-black'
+                      : isAligned
+                      ? 'text-black stroke-[2.5]'
+                      : 'text-gray-900'
                   }`}
                 />
               </div>
             </button>
           </div>
 
-          {/* 3. Right: Prominent Front / Back Camera Switch Button */}
-          <div className="w-16 h-16 flex items-center justify-center">
+          {/* Flip Camera Button */}
+          <div className="w-14 h-14 flex items-center justify-center">
             <button
               onClick={handleFlipClick}
               disabled={cameraSwitching}
-              className="flex flex-col items-center justify-center w-13 h-13 rounded-2xl glass-panel hover:bg-white/10 active:scale-90 transition-all border border-white/20 shadow-xl group"
-              title={`Switch Camera (Currently: ${isFront ? 'Front' : 'Back'})`}
+              className="w-11 h-11 rounded-full glass-pill border border-white/20 flex items-center justify-center text-white/90 active:scale-90 transition-transform shadow-md"
+              title="Switch Camera Lens"
             >
-              <div className="relative flex items-center justify-center">
-                <RotateCcw
-                  className={`w-5 h-5 text-emerald-400 transition-transform duration-500 ${
-                    spinFlip || cameraSwitching ? 'rotate-180' : 'group-hover:rotate-45'
-                  }`}
-                />
-                <FlipHorizontal className="w-2.5 h-2.5 text-white absolute -bottom-1 -right-1 opacity-70" />
-              </div>
-              <span className="text-[9px] font-bold text-gray-200 uppercase tracking-wider mt-0.5">
-                {isFront ? 'Front' : 'Back'}
-              </span>
+              <RotateCcw
+                className={`w-5 h-5 text-emerald-400 transition-transform duration-500 ${
+                  spinFlip || cameraSwitching ? 'rotate-180' : ''
+                }`}
+              />
             </button>
           </div>
         </div>
