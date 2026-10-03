@@ -140,3 +140,28 @@ export function triggerHaptic(type: 'light' | 'medium' | 'heavy' | 'double' = 'l
     console.warn('Vibration failed', e);
   }
 }
+
+/**
+ * Plays a countdown beep tone for timer and palm shutter
+ */
+export function playCountdownBeep(isFinal = false): void {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(isFinal ? 1200 : 800, now);
+    gain.gain.setValueAtTime(0.25, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + (isFinal ? 0.2 : 0.08));
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + (isFinal ? 0.22 : 0.09));
+    triggerHaptic(isFinal ? 'heavy' : 'light');
+  } catch (err) {
+    console.warn('Countdown beep error:', err);
+  }
+}
+

@@ -10,19 +10,21 @@ interface SkeletalOverlayProps {
   opacity?: number;
   guideMode?: 'silhouette' | 'hybrid' | 'skeletal';
   videoElement?: HTMLVideoElement | null;
+  viewfinderFit?: 'wide' | 'cover';
 }
 
 /**
  * Computes the exact isotropic rendered video box within the canvas container.
- * This completely eliminates mobile viewport stretching and squeezing!
+ * This completely eliminates mobile viewport stretching, squeezing, and zooming!
  */
 function getRenderedVideoBox(
   containerW: number,
   containerH: number,
-  video?: HTMLVideoElement | null
+  video?: HTMLVideoElement | null,
+  fit: 'wide' | 'cover' = 'wide'
 ) {
-  // Mobile smartphone camera streams are normally 9:16 (0.5625) in portrait
-  let videoAspect = 9 / 16;
+  // Native camera streams are 3:4 (0.75) in portrait
+  let videoAspect = 3 / 4;
   if (video && video.videoWidth > 0 && video.videoHeight > 0) {
     const isPortraitContainer = containerH > containerW;
     const isPortraitVideo = video.videoHeight > video.videoWidth;
@@ -39,18 +41,32 @@ function getRenderedVideoBox(
   let offsetX = 0;
   let offsetY = 0;
 
-  if (containerAspect < videoAspect) {
-    // Container is narrower (e.g. mobile phone screen). Video covers full height, crops edges horizontally
-    renderH = containerH;
-    renderW = containerH * videoAspect;
-    offsetX = (containerW - renderW) / 2;
-    offsetY = 0;
+  if (fit === 'wide') {
+    // object-contain: full uncropped wide view (zero zoom, zero crop)
+    if (containerAspect > videoAspect) {
+      renderH = containerH;
+      renderW = containerH * videoAspect;
+      offsetX = (containerW - renderW) / 2;
+      offsetY = 0;
+    } else {
+      renderW = containerW;
+      renderH = containerW / videoAspect;
+      offsetX = 0;
+      offsetY = (containerH - renderH) / 2;
+    }
   } else {
-    // Container is wider (e.g. desktop/laptop). Video covers full width, crops top/bottom
-    renderW = containerW;
-    renderH = containerW / videoAspect;
-    offsetX = 0;
-    offsetY = (containerH - renderH) / 2;
+    // object-cover: edge-to-edge fill
+    if (containerAspect < videoAspect) {
+      renderH = containerH;
+      renderW = containerH * videoAspect;
+      offsetX = (containerW - renderW) / 2;
+      offsetY = 0;
+    } else {
+      renderW = containerW;
+      renderH = containerW / videoAspect;
+      offsetX = 0;
+      offsetY = (containerH - renderH) / 2;
+    }
   }
 
   return { renderW, renderH, offsetX, offsetY };
@@ -65,7 +81,9 @@ export const SkeletalOverlay: React.FC<SkeletalOverlayProps> = ({
   opacity = 0.95,
   guideMode = 'silhouette',
   videoElement,
+  viewfinderFit = 'wide',
 }) => {
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -113,8 +131,9 @@ export const SkeletalOverlay: React.FC<SkeletalOverlayProps> = ({
 
     ctx.globalAlpha = opacity;
 
-    // Calculate isotropic video bounding box to prevent ANY squeezing on mobile screens
-    const { renderW, renderH, offsetX, offsetY } = getRenderedVideoBox(width, height, videoElement);
+    // Calculate isotropic video bounding box to prevent ANY squeezing or zooming on mobile screens
+    const { renderW, renderH, offsetX, offsetY } = getRenderedVideoBox(width, height, videoElement, viewfinderFit);
+
 
     // Isotropic coordinate conversion helper
     const toScreen = (pt: Point2D) => {

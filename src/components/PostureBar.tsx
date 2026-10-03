@@ -19,7 +19,8 @@ export const PostureBar: React.FC<PostureBarProps> = ({
   isAnalyzing,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
+
 
   const filteredPoses =
     selectedCategory === 'All'

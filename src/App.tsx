@@ -14,7 +14,7 @@ import { DEFAULT_POSES } from './data/defaultPoses';
 import { cameraService } from './services/cameraService';
 import { poseDetectionService } from './services/poseDetectionService';
 import { aiVisionService } from './services/aiVisionService';
-import { playShutterSound, playAlignedChime, triggerHaptic } from './utils/audioHaptics';
+import { playShutterSound, playAlignedChime, triggerHaptic, playCountdownBeep } from './utils/audioHaptics';
 import { createStampedPhoto } from './utils/watermark';
 import { SkeletalOverlay } from './components/SkeletalOverlay';
 import { CameraHUD } from './components/CameraHUD';
@@ -26,7 +26,6 @@ import { PoseReferencePIP } from './components/PoseReferencePIP';
 export const App: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
-  const autoCaptureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialAnalysisDoneRef = useRef(false);
 
   // Camera & Sensor State
@@ -61,7 +60,20 @@ export const App: React.FC = () => {
   const [alignmentSensitivity, setAlignmentSensitivity] = useState(75);
   const [guideOpacity, setGuideOpacity] = useState(0.90);
   const [guideMode, setGuideMode] = useState<'silhouette' | 'hybrid' | 'skeletal'>('silhouette');
-  const [autoCaptureCountdown, setAutoCaptureCountdown] = useState<number | null>(null);
+  const [viewfinderMode, setViewfinderMode] = useState<'wide' | 'cover'>('wide');
+
+  // Advanced Smartphone Selfie Shutter Modes
+  const [timerDuration, setTimerDuration] = useState<0 | 3 | 5 | 10>(0);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [countdownReason, setCountdownReason] = useState<string | null>(null);
+  const [tapToCapture, setTapToCapture] = useState<boolean>(true);
+  const [palmCapture, setPalmCapture] = useState<boolean>(true);
+  const [voiceCapture, setVoiceCapture] = useState<boolean>(false);
+
+  const countdownIntervalRef = useRef<number | null>(null);
+  const lastPalmTriggerTimeRef = useRef<number>(0);
+  const palmHoldStartRef = useRef<number | null>(null);
+
 
   // Captured Photos History
   const [capturedPhotos, setCapturedPhotos] = useState<CapturedPhoto[]>([]);
@@ -275,31 +287,187 @@ export const App: React.FC = () => {
     }
   }, [alignment, currentPose]);
 
-  // 5. Auto-Capture Trigger when Aligned
-  useEffect(() => {
-    if (!autoCapture) {
-      if (autoCaptureTimerRef.current) {
-        clearTimeout(autoCaptureTimerRef.current);
-        autoCaptureTimerRef.current = null;
+  // 5. Unified Selfie Shutter Orchestrator with Audio Countdown & Vibration
+  const cancelCountdown = useCallback(() => {
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
+    }
+    setCountdown(null);
+    setCountdownReason(null);
+  }, []);
+
+  const triggerShutter = useCallback(
+    (customDelay?: number, reason?: string) => {
+      if (isCapturingRef.current) return;
+
+      const delay = customDelay !== undefined ? customDelay : timerDuration;
+      if (delay <= 0) {
+        cancelCountdown();
+        handleCapture();
+        return;
       }
-      setAutoCaptureCountdown(null);
+
+      cancelCountdown();
+
+      let current = delay;
+      setCountdown(current);
+      setCountdownReason(reason || `${delay}s Timer`);
+      playCountdownBeep(false);
+
+      countdownIntervalRef.current = window.setInterval(() => {
+        current -= 1;
+        if (current > 0) {
+          setCountdown(current);
+          playCountdownBeep(current === 1);
+        } else {
+          cancelCountdown();
+          handleCapture();
+        }
+      }, 1000);
+    },
+    [timerDuration, handleCapture, cancelCountdown]
+  );
+
+  // 6. Palm Gesture Detection for Front Camera (Samsung/Pixel style: Raised Palm starts 3s Countdown)
+  useEffect(() => {
+    if (!palmCapture || isCapturingRef.current || countdown !== null || showPreview) {
+      palmHoldStartRef.current = null;
       return;
     }
 
-    if (alignment.isAligned && !autoCaptureCountdown && !showPreview) {
-      setAutoCaptureCountdown(1);
-      const timer = setTimeout(() => {
-        handleCapture();
-        setAutoCaptureCountdown(null);
-      }, 1100);
-      return () => clearTimeout(timer);
-    }
-  }, [alignment.isAligned, autoCapture, autoCaptureCountdown, handleCapture, showPreview]);
+    if (!liveLandmarks) return;
 
-  // Hardware Shutter Keys: Smartphone Volume Up/Down, Bluetooth Selfie Sticks, Laptop Spacebar/Enter
+    const leftWrist = liveLandmarks['left_wrist'];
+    const leftShoulder = liveLandmarks['left_shoulder'];
+    const rightWrist = liveLandmarks['right_wrist'];
+    const rightShoulder = liveLandmarks['right_shoulder'];
+
+    const leftRaised =
+      leftWrist &&
+      leftShoulder &&
+      leftWrist.y < leftShoulder.y - 0.04 &&
+      (leftWrist.visibility ?? 1) > 0.45;
+
+    const rightRaised =
+      rightWrist &&
+      rightShoulder &&
+      rightWrist.y < rightShoulder.y - 0.04 &&
+      (rightWrist.visibility ?? 1) > 0.45;
+
+    const now = Date.now();
+    if (now - lastPalmTriggerTimeRef.current < 4000) {
+      return;
+    }
+
+    if (leftRaised || rightRaised) {
+      if (!palmHoldStartRef.current) {
+        palmHoldStartRef.current = now;
+      } else if (now - palmHoldStartRef.current > 450) {
+        lastPalmTriggerTimeRef.current = now;
+        palmHoldStartRef.current = null;
+        triggerShutter(3, '✋ Palm Detected!');
+      }
+    } else {
+      palmHoldStartRef.current = null;
+    }
+  }, [liveLandmarks, palmCapture, countdown, showPreview, triggerShutter]);
+
+  // 7. Voice Shutter (Web Speech API: Say "Cheese" / "Smile" / "Click" to Snap)
+  useEffect(() => {
+    if (!voiceCapture || showPreview) return;
+
+    const SpeechRecClass =
+      (window as unknown as { SpeechRecognition?: any; webkitSpeechRecognition?: any })
+        .SpeechRecognition ||
+      (window as unknown as { webkitSpeechRecognition?: any }).webkitSpeechRecognition;
+
+    if (!SpeechRecClass) {
+      setAiNotice({
+        type: 'warn',
+        text: 'Voice Shutter not supported in this browser. Please use Chrome on Android.',
+      });
+      setVoiceCapture(false);
+      return;
+    }
+
+    let recognition: any = null;
+    let isSubscribed = true;
+
+    try {
+      recognition = new SpeechRecClass();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (event: any) => {
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const phrase = event.results[i][0]?.transcript?.trim().toLowerCase() || '';
+          if (
+            phrase.includes('cheese') ||
+            phrase.includes('smile') ||
+            phrase.includes('click') ||
+            phrase.includes('capture') ||
+            phrase.includes('shoot') ||
+            phrase.includes('snap') ||
+            phrase.includes('photo')
+          ) {
+            triggerShutter(1, `🎙️ Heard "${phrase}"!`);
+            break;
+          }
+        }
+      };
+
+      recognition.onerror = (err: any) => {
+        if (err.error === 'not-allowed') {
+          setAiNotice({
+            type: 'warn',
+            text: 'Microphone permission needed for Voice Shutter.',
+          });
+          setVoiceCapture(false);
+        }
+      };
+
+      recognition.onend = () => {
+        if (isSubscribed && voiceCapture) {
+          try {
+            recognition.start();
+          } catch {}
+        }
+      };
+
+      recognition.start();
+      setAiNotice({
+        type: 'success',
+        text: '🎙️ Voice Shutter Active! Say "Cheese", "Smile", or "Click" to snap!',
+      });
+    } catch (e) {
+      console.warn('Speech recognition start failed:', e);
+      setVoiceCapture(false);
+    }
+
+    return () => {
+      isSubscribed = false;
+      if (recognition) {
+        try {
+          recognition.abort();
+        } catch {}
+      }
+    };
+  }, [voiceCapture, showPreview, triggerShutter]);
+
+  // 8. Auto-Capture Trigger when Aligned
+  useEffect(() => {
+    if (!autoCapture) return;
+
+    if (alignment.isAligned && countdown === null && !showPreview && !isCapturingRef.current) {
+      triggerShutter(1, '✨ Pose Matched! Hold still...');
+    }
+  }, [alignment.isAligned, autoCapture, countdown, showPreview, triggerShutter]);
+
+  // 9. Hardware Shutter Keys: Smartphone Volume Up/Down, Bluetooth Selfie Sticks, Laptop Spacebar/Enter
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if user is typing in settings or modal text inputs
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement ||
@@ -311,7 +479,6 @@ export const App: React.FC = () => {
       const key = e.key;
       const code = e.code;
 
-      // Smartphone Hardware Volume Keys, Bluetooth Selfie Sticks, Space, Enter, Camera key
       if (
         key === 'AudioVolumeUp' ||
         key === 'AudioVolumeDown' ||
@@ -321,33 +488,32 @@ export const App: React.FC = () => {
         code === 'AudioVolumeDown' ||
         key === 'Camera' ||
         code === 'Camera' ||
-        key === ' ' || // Spacebar for laptops
+        key === ' ' ||
         code === 'Space' ||
         key === 'Enter' ||
         code === 'Enter'
       ) {
         e.preventDefault();
         e.stopPropagation();
-        handleCapture();
+        triggerShutter();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown, { capture: true });
 
-    // Support Bluetooth Selfie Sticks / Media controls via MediaSession
     if ('mediaSession' in navigator) {
       try {
-        navigator.mediaSession.setActionHandler('play', () => handleCapture());
-        navigator.mediaSession.setActionHandler('pause', () => handleCapture());
-        navigator.mediaSession.setActionHandler('nexttrack', () => handleCapture());
-        navigator.mediaSession.setActionHandler('previoustrack', () => handleCapture());
+        navigator.mediaSession.setActionHandler('play', () => triggerShutter());
+        navigator.mediaSession.setActionHandler('pause', () => triggerShutter());
+        navigator.mediaSession.setActionHandler('nexttrack', () => triggerShutter());
+        navigator.mediaSession.setActionHandler('previoustrack', () => triggerShutter());
       } catch {}
     }
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown, { capture: true });
     };
-  }, [handleCapture]);
+  }, [triggerShutter]);
 
   // 6. Camera Controls: Front / Back Camera Switch
   const handleSwitchCamera = async () => {
@@ -358,12 +524,19 @@ export const App: React.FC = () => {
     try {
       const info = await cameraService.switchCamera(videoRef.current);
       setSensorInfo(info);
-    } catch (e) {
+      setTorchActive(false);
+    } catch (e: any) {
       console.error('Camera switch failed:', e);
+      setAiNotice({
+        type: 'warn',
+        text: `Camera switch note: ${e?.message || 'Could not access lens'}`,
+      });
+      setTimeout(() => setAiNotice(null), 3000);
     } finally {
       setCameraSwitching(false);
     }
   };
+
 
   const handleToggleTorch = async () => {
     const state = await cameraService.toggleTorch();
@@ -385,8 +558,13 @@ export const App: React.FC = () => {
     triggerHaptic('light');
   };
 
+  const handleSetZoom = async (level: number) => {
+    await cameraService.setZoom(level);
+    setSensorInfo((prev) => (prev ? { ...prev, zoomCurrent: level } : null));
+    triggerHaptic('light');
+  };
 
-  // Touch to focus handler
+  // Touch to focus handler & Tap to Snap
   const handleTouchFocus = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
@@ -400,12 +578,25 @@ export const App: React.FC = () => {
     setTimeout(() => setTapFocusCoord(null), 1200);
   };
 
+  const handleViewfinderClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (countdown !== null) {
+      cancelCountdown();
+      return;
+    }
+
+    handleTouchFocus(e);
+
+    if (tapToCapture) {
+      triggerShutter();
+    }
+  };
+
   return (
     <div className="relative w-full h-[100dvh] bg-black overflow-hidden select-none touch-none flex flex-col justify-center items-center">
       {/* 1. Fullscreen Video Stream Viewfinder */}
       <div
-        className="relative w-full h-full flex items-center justify-center overflow-hidden"
-        onClick={handleTouchFocus}
+        className="relative w-full h-full flex items-center justify-center overflow-hidden cursor-pointer"
+        onClick={handleViewfinderClick}
       >
         <video
           ref={videoRef}
@@ -413,7 +604,9 @@ export const App: React.FC = () => {
           autoPlay
           muted
           onPlaying={handleVideoPlaying}
-          className={`w-full h-full object-cover transition-transform duration-300 ${
+          className={`w-full h-full ${
+            viewfinderMode === 'wide' ? 'object-contain' : 'object-cover'
+          } transition-all duration-300 ${
             sensorInfo?.facingMode === 'user' ? 'scale-x-[-1]' : ''
           }`}
         />
@@ -427,7 +620,9 @@ export const App: React.FC = () => {
           opacity={guideOpacity}
           guideMode={guideMode}
           videoElement={videoRef.current}
+          viewfinderFit={viewfinderMode}
         />
+
 
         {/* 3. Touch Focus Ring */}
         {tapFocusCoord && (
@@ -522,7 +717,7 @@ export const App: React.FC = () => {
         torchActive={torchActive}
         onToggleTorch={handleToggleTorch}
         onSwitchCamera={handleSwitchCamera}
-        onCapture={handleCapture}
+        onCapture={() => triggerShutter()}
         onAnalyzeScene={handlePerformAnalysis}
         isAnalyzing={isAnalyzing}
         onOpenPoseSelector={() => setShowPoseSelector(true)}
@@ -531,7 +726,6 @@ export const App: React.FC = () => {
         lastPhoto={lastPhoto}
         showGrid={showGrid}
         onToggleGrid={() => setShowGrid(!showGrid)}
-        autoCaptureCountdown={autoCaptureCountdown}
         cameraSwitching={cameraSwitching}
         guideMode={guideMode}
         onToggleGuideMode={() =>
@@ -539,7 +733,39 @@ export const App: React.FC = () => {
         }
         isCapturing={isCapturingState}
         onToggleResolutionMode={handleToggleResolutionMode}
+        viewfinderMode={viewfinderMode}
+        onToggleViewfinderMode={() => setViewfinderMode((prev) => (prev === 'wide' ? 'cover' : 'wide'))}
+        onSetZoom={handleSetZoom}
+        timerDuration={timerDuration}
+        onCycleTimer={() => {
+          setTimerDuration((prev) => (prev === 0 ? 3 : prev === 3 ? 5 : 0));
+          triggerHaptic('light');
+        }}
+        tapToCapture={tapToCapture}
+        onToggleTapToCapture={() => {
+          setTapToCapture((prev) => !prev);
+          triggerHaptic('light');
+        }}
+        palmCapture={palmCapture}
+        onTogglePalmCapture={() => {
+          setPalmCapture((prev) => !prev);
+          triggerHaptic('light');
+        }}
+        voiceCapture={voiceCapture}
+        onToggleVoiceCapture={() => {
+          setVoiceCapture((prev) => !prev);
+          triggerHaptic('light');
+        }}
+        autoCapture={autoCapture}
+        onToggleAutoCapture={() => {
+          setAutoCapture((prev) => !prev);
+          triggerHaptic('light');
+        }}
+        countdown={countdown}
+        countdownReason={countdownReason}
+        onCancelCountdown={cancelCountdown}
       />
+
 
       {/* Floating Draggable Picture-In-Picture Reference Card */}
       <PoseReferencePIP
