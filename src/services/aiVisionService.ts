@@ -22,7 +22,9 @@ export class AIVisionService {
   private cachedModels: string[] = [];
 
   constructor() {
-    this.apiKey = this.sanitizeApiKey(localStorage.getItem(API_KEY_STORAGE) || '');
+    this.apiKey = this.sanitizeApiKey(
+      localStorage.getItem(API_KEY_STORAGE) || (import.meta.env.VITE_GEMINI_API_KEY as string) || ''
+    );
     const storedModel = localStorage.getItem(MODEL_PREF_STORAGE) || 'auto';
     // If user previously saved a deprecated model (e.g. gemini-2.5-pro), reset to auto
     if (DEPRECATED_MODELS.includes(storedModel)) {
