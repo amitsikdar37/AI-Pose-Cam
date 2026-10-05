@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import type { AlignmentResult, JointName, Point2D, PoseLandmarks, PosePreset, PoseArchetype } from '../types/camera';
+import type { AlignmentResult, JointName, Point2D, PoseLandmarks, PosePreset } from '../types/camera';
 
 interface SkeletalOverlayProps {
   currentPose?: PosePreset | null;
@@ -156,31 +156,37 @@ export const SkeletalOverlay: React.FC<SkeletalOverlayProps> = ({
     ctx.shadowColor = glowColor;
     ctx.shadowBlur = isAligned ? 18 : 10;
 
-    // 1. Draw Tailored Silhouette Outline based on Archetype and Pose ID
-    const archetype = getArchetypeFromPose(currentPose);
-    const leanSide = getLeanSideFromPose(currentPose);
-
-    if (archetype === 'railing_lean') {
-      drawRailingLeanSilhouette(ctx, toScreen, renderW, renderH, isMirrored, leanSide);
-    } else if (archetype === 'seated_lean') {
-      drawSeatedLeanSilhouette(ctx, toScreen, renderW, renderH, isMirrored, leanSide);
-    } else if (archetype === 'seated_steps') {
+    // 1. Draw Silhouette Outline
+    // For curated catalog poses (selected explicitly from catalog), use their tailored drawing
+    // For ALL dynamic AI-generated poses and bespoke landmarks, draw the Anatomical Silhouette
+    const poseId = currentPose?.id || '';
+    if (poseId === 'downtown_steps') {
       drawDowntownStepsSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
-    } else if (archetype === 'selfie_hair') {
+    } else if (poseId === 'selfie_hair') {
       drawSelfieHairSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
-    } else if (archetype === 'wall_lean') {
+    } else if (poseId === 'downtown_lean') {
       drawDowntownLeanSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
-    } else if (archetype === 'hands_hips') {
+    } else if (poseId === 'hands_hips') {
       drawHandsHipsSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
-    } else if (archetype === 'editorial_collar') {
+    } else if (poseId === 'editorial_collar') {
       drawEditorialCollarSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
-    } else if (archetype === 'power_portrait') {
+    } else if (poseId === 'power_portrait') {
       drawPowerPortraitSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
-    } else if (archetype === 'walking_candid') {
+    } else if (poseId === 'golden_hour_candid') {
       drawWalkingCandidSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
     } else {
-      // Universal Continuous Anatomical Human Silhouette for any custom pose
-      drawContinuousAnatomicalSilhouette(ctx, landmarks, toScreen, renderW, renderH, isMirrored);
+      // Dynamic AI Pose or Bespoke Pose directly from LLM landmarks
+      drawAnatomicalHumanSilhouette(
+        ctx,
+        landmarks,
+        toScreen,
+        renderW,
+        renderH,
+        isMirrored,
+        isAligned,
+        silhouetteColor,
+        glowColor
+      );
     }
 
     // 2. Optional Hybrid / Skeletal Inner Markers
@@ -188,8 +194,8 @@ export const SkeletalOverlay: React.FC<SkeletalOverlayProps> = ({
       drawInnerSkeletalGuide(ctx, landmarks, toScreen, isAligned, silhouetteColor);
     }
 
-    // 3. Draw Live User Detection Tracking Feedback (Soft glowing anchors so user sees where their body is)
-    if (liveLandmarks) {
+    // 3. Live User Detection Tracking Feedback (shown ONLY in hybrid or skeletal mode to avoid cluttering pure silhouette)
+    if (liveLandmarks && (guideMode === 'hybrid' || guideMode === 'skeletal')) {
       drawLiveUserFeedback(ctx, liveLandmarks, toScreen, isAligned);
     }
 
@@ -593,274 +599,10 @@ function drawPowerPortraitSilhouette(
   ctx.lineTo(rHip.x, rHip.y);
   ctx.lineTo(lHip.x, lHip.y);
   ctx.lineTo(lElb.x, lElb.y + 10);
-  ctx.stroke();
 }
 
 /**
- * Helper to determine pose archetype from pose data or text keywords
- */
-function getArchetypeFromPose(pose?: PosePreset | null): PoseArchetype {
-  if (!pose) return 'general';
-  if (pose.archetype) return pose.archetype;
-
-  const id = (pose.id || '').toLowerCase();
-  const text = `${pose.id} ${pose.title} ${pose.directionTip} ${pose.vibe} ${pose.reasoning || ''}`.toLowerCase();
-
-  if (text.includes('railing') || text.includes('handrail') || (text.includes('stair') && text.includes('lean'))) {
-    return 'railing_lean';
-  }
-  if (text.includes('seated') && text.includes('lean')) {
-    return 'seated_lean';
-  }
-  if (id.includes('step') || text.includes('steps') || (text.includes('sit') && text.includes('stair'))) {
-    return 'seated_steps';
-  }
-  if (id.includes('hair') || text.includes('hair') || text.includes('selfie')) {
-    return 'selfie_hair';
-  }
-  if (id.includes('lean') || text.includes('wall') || text.includes('pillar') || text.includes('window')) {
-    return 'wall_lean';
-  }
-  if (id.includes('hip') || text.includes('hip')) {
-    return 'hands_hips';
-  }
-  if (id.includes('collar') || text.includes('collar') || text.includes('jacket')) {
-    return 'editorial_collar';
-  }
-  if (id.includes('power') || text.includes('luminary') || text.includes('cross')) {
-    return 'power_portrait';
-  }
-  if (id.includes('stride') || text.includes('walk') || text.includes('dynamic')) {
-    return 'walking_candid';
-  }
-  return 'general';
-}
-
-function getLeanSideFromPose(pose?: PosePreset | null): 'left' | 'right' {
-  if (pose?.leanSide) return pose.leanSide;
-  const text = `${pose?.title || ''} ${pose?.directionTip || ''} ${pose?.reasoning || ''}`.toLowerCase();
-  if (text.includes('left arm') || text.includes('left rail') || text.includes('left side')) {
-    return 'left';
-  }
-  return 'right';
-}
-
-/**
- * 7. The Staircase Railing Lean:
- * Model leans against a staircase / balcony / bridge handrail.
- * Displays an environmental diagonal handrail guide line with arm resting directly on it.
- */
-function drawRailingLeanSilhouette(
-  ctx: CanvasRenderingContext2D,
-  toScreen: (pt: Point2D) => { x: number; y: number },
-  w: number,
-  _h: number,
-  isMirrored: boolean,
-  leanSide: 'left' | 'right' = 'right'
-) {
-  const isRight = leanSide === 'right';
-
-  // Head
-  const headCenter = toScreen({ x: isRight ? 0.48 : 0.52, y: 0.16 });
-  const headRx = w * 0.088;
-  const headRy = headRx * 1.28;
-
-  ctx.beginPath();
-  ctx.ellipse(headCenter.x, headCenter.y, headRx, headRy, (isRight ? 0.08 : -0.08) * (isMirrored ? -1 : 1), 0, Math.PI * 2);
-  ctx.stroke();
-
-  // Neck lines
-  ctx.beginPath();
-  ctx.moveTo(headCenter.x - headRx * 0.45, headCenter.y + headRy * 0.85);
-  ctx.lineTo(headCenter.x - headRx * 0.55, headCenter.y + headRy * 1.15);
-  ctx.moveTo(headCenter.x + headRx * 0.45, headCenter.y + headRy * 0.85);
-  ctx.lineTo(headCenter.x + headRx * 0.55, headCenter.y + headRy * 1.15);
-  ctx.stroke();
-
-  // ENVIRONMENTAL GUIDE: Staircase Railing / Handrail Diagonal Line!
-  ctx.save();
-  ctx.setLineDash([12, 6]);
-  ctx.lineWidth = 2.2;
-  ctx.globalAlpha = 0.55;
-  ctx.beginPath();
-  if (isRight) {
-    const railStart = toScreen({ x: 0.50, y: 0.32 });
-    const railEnd = toScreen({ x: 0.95, y: 0.58 });
-    ctx.moveTo(railStart.x, railStart.y);
-    ctx.lineTo(railEnd.x, railEnd.y);
-  } else {
-    const railStart = toScreen({ x: 0.50, y: 0.32 });
-    const railEnd = toScreen({ x: 0.05, y: 0.58 });
-    ctx.moveTo(railStart.x, railStart.y);
-    ctx.lineTo(railEnd.x, railEnd.y);
-  }
-  ctx.stroke();
-  ctx.restore();
-
-  // Shoulders & Arm resting on railing
-  const railSh = toScreen({ x: isRight ? 0.58 : 0.42, y: 0.29 });
-  const freeSh = toScreen({ x: isRight ? 0.38 : 0.62, y: 0.27 });
-  const railElb = toScreen({ x: isRight ? 0.70 : 0.30, y: 0.40 });
-  const railWr = toScreen({ x: isRight ? 0.76 : 0.24, y: 0.44 });
-
-  // Railing Arm Contour (resting along railing)
-  ctx.beginPath();
-  ctx.moveTo(headCenter.x + (isRight ? headRx * 0.5 : -headRx * 0.5), headCenter.y + headRy);
-  ctx.quadraticCurveTo(railSh.x, railSh.y - 10, railSh.x + (isRight ? 12 : -12), railSh.y + 5);
-  ctx.lineTo(railElb.x + (isRight ? 14 : -14), railElb.y);
-  ctx.lineTo(railWr.x + (isRight ? 16 : -16), railWr.y);
-  ctx.quadraticCurveTo(railWr.x + (isRight ? 20 : -20), railWr.y + 12, railWr.x, railWr.y + 12);
-  ctx.lineTo(railElb.x, railElb.y + 16);
-  ctx.lineTo(railSh.x - (isRight ? 10 : -10), railSh.y + 20);
-  ctx.stroke();
-
-  // Free Arm (hand casually tucked in pocket)
-  const freeElb = toScreen({ x: isRight ? 0.30 : 0.70, y: 0.41 });
-  const freeWr = toScreen({ x: isRight ? 0.37 : 0.63, y: 0.53 });
-  ctx.beginPath();
-  ctx.moveTo(headCenter.x - (isRight ? headRx * 0.5 : -headRx * 0.5), headCenter.y + headRy);
-  ctx.quadraticCurveTo(freeSh.x, freeSh.y - 10, freeSh.x - (isRight ? 10 : -10), freeSh.y + 5);
-  ctx.lineTo(freeElb.x - (isRight ? 12 : -12), freeElb.y);
-  ctx.quadraticCurveTo(freeElb.x, freeElb.y + 12, freeWr.x - (isRight ? 8 : -8), freeWr.y);
-  ctx.lineTo(freeWr.x + (isRight ? 10 : -10), freeWr.y);
-  ctx.lineTo(freeElb.x + (isRight ? 8 : -8), freeElb.y);
-  ctx.stroke();
-
-  // Leaning Torso
-  const lHip = toScreen({ x: 0.42, y: 0.56 });
-  const rHip = toScreen({ x: 0.55, y: 0.56 });
-  ctx.beginPath();
-  ctx.moveTo(freeSh.x, freeSh.y + 10);
-  ctx.lineTo(isRight ? lHip.x : rHip.x, isRight ? lHip.y : rHip.y);
-  ctx.lineTo(isRight ? rHip.x : lHip.x, isRight ? rHip.y : lHip.y);
-  ctx.lineTo(railSh.x, railSh.y + 10);
-  ctx.stroke();
-
-  // Crossed Legs (One weight-bearing leg, one crossed front leg)
-  const backHip = isRight ? rHip : lHip;
-  const backKnee = toScreen({ x: isRight ? 0.52 : 0.48, y: 0.72 });
-  const backAnkle = toScreen({ x: isRight ? 0.46 : 0.54, y: 0.92 });
-  ctx.beginPath();
-  ctx.moveTo(backHip.x, backHip.y);
-  ctx.lineTo(backKnee.x + (isRight ? 10 : -10), backKnee.y);
-  ctx.lineTo(backAnkle.x + (isRight ? 8 : -8), backAnkle.y);
-  ctx.lineTo(backAnkle.x - (isRight ? 12 : -12), backAnkle.y);
-  ctx.lineTo(backKnee.x - (isRight ? 10 : -10), backKnee.y);
-  ctx.stroke();
-
-  const frontHip = isRight ? lHip : rHip;
-  const frontKnee = toScreen({ x: isRight ? 0.48 : 0.52, y: 0.73 });
-  const frontAnkle = toScreen({ x: isRight ? 0.52 : 0.48, y: 0.91 });
-  ctx.beginPath();
-  ctx.moveTo(frontHip.x, frontHip.y);
-  ctx.quadraticCurveTo(frontKnee.x - (isRight ? 12 : -12), frontKnee.y, frontAnkle.x - (isRight ? 10 : -10), frontAnkle.y);
-  ctx.lineTo(frontAnkle.x + (isRight ? 14 : -14), frontAnkle.y);
-  ctx.quadraticCurveTo(frontKnee.x + (isRight ? 12 : -12), frontKnee.y, frontHip.x + (isRight ? 10 : -10), frontHip.y);
-  ctx.stroke();
-}
-
-/**
- * 8. The Seated Architectural Lean:
- * Model seated comfortably on steps / bench / ledge.
- * Displays horizontal surface guide line, asymmetric knees, and relaxed posture.
- */
-function drawSeatedLeanSilhouette(
-  ctx: CanvasRenderingContext2D,
-  toScreen: (pt: Point2D) => { x: number; y: number },
-  w: number,
-  _h: number,
-  isMirrored: boolean,
-  leanSide: 'left' | 'right' = 'right'
-) {
-  const isRight = leanSide === 'right';
-
-  // Head
-  const headCenter = toScreen({ x: isRight ? 0.48 : 0.52, y: 0.20 });
-  const headRx = w * 0.092;
-  const headRy = headRx * 1.28;
-
-  ctx.beginPath();
-  ctx.ellipse(headCenter.x, headCenter.y, headRx, headRy, (isRight ? 0.08 : -0.08) * (isMirrored ? -1 : 1), 0, Math.PI * 2);
-  ctx.stroke();
-
-  // ENVIRONMENTAL GUIDE: Horizontal Ledge / Step surface
-  ctx.save();
-  ctx.setLineDash([12, 6]);
-  ctx.lineWidth = 2.0;
-  ctx.globalAlpha = 0.50;
-  const ledgeY = toScreen({ x: 0.50, y: 0.63 }).y;
-  ctx.beginPath();
-  ctx.moveTo(w * 0.15, ledgeY);
-  ctx.lineTo(w * 0.85, ledgeY);
-  ctx.stroke();
-  ctx.restore();
-
-  // Torso seated
-  const lSh = toScreen({ x: 0.38, y: 0.34 });
-  const rSh = toScreen({ x: 0.58, y: 0.35 });
-  const lHip = toScreen({ x: 0.42, y: 0.62 });
-  const rHip = toScreen({ x: 0.56, y: 0.62 });
-
-  ctx.beginPath();
-  ctx.moveTo(lSh.x - 10, lSh.y + 10);
-  ctx.lineTo(lHip.x - 12, lHip.y);
-  ctx.lineTo(rHip.x + 12, rHip.y);
-  ctx.lineTo(rSh.x + 10, rSh.y + 10);
-  ctx.stroke();
-
-  // One arm resting on knee, one propped back on ledge
-  const propSh = isRight ? rSh : lSh;
-  const propElb = toScreen({ x: isRight ? 0.68 : 0.32, y: 0.48 });
-  const propWr = toScreen({ x: isRight ? 0.72 : 0.28, y: 0.62 });
-
-  ctx.beginPath();
-  ctx.moveTo(propSh.x, propSh.y + 5);
-  ctx.lineTo(propElb.x + (isRight ? 12 : -12), propElb.y);
-  ctx.lineTo(propWr.x + (isRight ? 12 : -12), propWr.y);
-  ctx.lineTo(propWr.x - (isRight ? 10 : -10), propWr.y);
-  ctx.lineTo(propElb.x - (isRight ? 10 : -10), propElb.y);
-  ctx.stroke();
-
-  const kneeSh = isRight ? lSh : rSh;
-  const kneeElb = toScreen({ x: isRight ? 0.32 : 0.68, y: 0.48 });
-  const kneeWr = toScreen({ x: isRight ? 0.38 : 0.62, y: 0.58 });
-
-  ctx.beginPath();
-  ctx.moveTo(kneeSh.x, kneeSh.y + 5);
-  ctx.lineTo(kneeElb.x - (isRight ? 12 : -12), kneeElb.y);
-  ctx.lineTo(kneeWr.x, kneeWr.y);
-  ctx.lineTo(kneeElb.x + (isRight ? 8 : -8), kneeElb.y);
-  ctx.stroke();
-
-  // Bent knee raised up (on step/ledge)
-  const raisedHip = isRight ? lHip : rHip;
-  const raisedKnee = toScreen({ x: isRight ? 0.35 : 0.65, y: 0.69 });
-  const raisedFoot = toScreen({ x: isRight ? 0.38 : 0.62, y: 0.90 });
-
-  ctx.beginPath();
-  ctx.moveTo(raisedHip.x, raisedHip.y);
-  ctx.quadraticCurveTo(raisedKnee.x - (isRight ? 16 : -16), raisedKnee.y - 12, raisedKnee.x, raisedKnee.y);
-  ctx.lineTo(raisedFoot.x + (isRight ? 12 : -12), raisedFoot.y);
-  ctx.lineTo(raisedFoot.x - (isRight ? 14 : -14), raisedFoot.y);
-  ctx.quadraticCurveTo(raisedKnee.x + (isRight ? 14 : -14), raisedKnee.y, raisedHip.x + (isRight ? 14 : -14), raisedHip.y);
-  ctx.stroke();
-
-  // Relaxed leg extending down
-  const relaxHip = isRight ? rHip : lHip;
-  const relaxKnee = toScreen({ x: isRight ? 0.62 : 0.38, y: 0.76 });
-  const relaxFoot = toScreen({ x: isRight ? 0.64 : 0.36, y: 0.93 });
-
-  ctx.beginPath();
-  ctx.moveTo(relaxHip.x, relaxHip.y);
-  ctx.lineTo(relaxKnee.x + (isRight ? 12 : -12), relaxKnee.y);
-  ctx.lineTo(relaxFoot.x + (isRight ? 12 : -12), relaxFoot.y);
-  ctx.lineTo(relaxFoot.x - (isRight ? 14 : -14), relaxFoot.y);
-  ctx.lineTo(relaxKnee.x - (isRight ? 12 : -12), relaxKnee.y);
-  ctx.stroke();
-}
-
-/**
- * 9. The Candid Stride Silhouette (Walking)
+ * 7. The Candid Stride Silhouette (Walking)
  */
 function drawWalkingCandidSilhouette(
   ctx: CanvasRenderingContext2D,
@@ -935,120 +677,212 @@ function drawWalkingCandidSilhouette(
  * Used for dynamic bespoke poses, rendering smooth anatomical contours instead of rigid disconnected pills.
  * Includes automated biomechanical invariant validation so an inverted wireframe is NEVER drawn.
  */
-function drawContinuousAnatomicalSilhouette(
+/**
+ * Anatomical Human Silhouette Engine
+ * Constructs continuous, organic human body geometry with true perpendicular normals,
+ * tapered limbs, natural curves, head & neck, and subtle translucent body fill.
+ * Works universally for ANY pose suggested by the LLM or selected from presets.
+ */
+function drawAnatomicalHumanSilhouette(
   ctx: CanvasRenderingContext2D,
   rawLandmarks: PoseLandmarks,
   toScreen: (pt: Point2D) => { x: number; y: number },
   w: number,
   _h: number,
-  _isMirrored: boolean
+  _isMirrored: boolean,
+  isAligned: boolean,
+  silhouetteColor: string,
+  glowColor: string
 ) {
   const landmarks: PoseLandmarks = { ...rawLandmarks };
-  const nose = landmarks.nose;
-  const lSh = landmarks.left_shoulder;
-  const rSh = landmarks.right_shoulder;
-  const lHip = landmarks.left_hip;
-  const rHip = landmarks.right_hip;
-  const lKnee = landmarks.left_knee;
-  const rKnee = landmarks.right_knee;
-  const lAnk = landmarks.left_ankle;
-  const rAnk = landmarks.right_ankle;
-  const lElb = landmarks.left_elbow;
-  const rElb = landmarks.right_elbow;
-  const lWr = landmarks.left_wrist;
-  const rWr = landmarks.right_wrist;
+  const pNose = toScreen(landmarks.nose || { x: 0.50, y: 0.18 });
+  const pLSh = toScreen(landmarks.left_shoulder || { x: 0.40, y: 0.30 });
+  const pRSh = toScreen(landmarks.right_shoulder || { x: 0.60, y: 0.30 });
+  const pLElb = toScreen(landmarks.left_elbow || { x: 0.35, y: 0.44 });
+  const pRElb = toScreen(landmarks.right_elbow || { x: 0.65, y: 0.44 });
+  const pLWr = toScreen(landmarks.left_wrist || { x: 0.38, y: 0.58 });
+  const pRWr = toScreen(landmarks.right_wrist || { x: 0.62, y: 0.58 });
+  const pLHip = toScreen(landmarks.left_hip || { x: 0.44, y: 0.58 });
+  const pRHip = toScreen(landmarks.right_hip || { x: 0.56, y: 0.58 });
+  const pLKnee = toScreen(landmarks.left_knee || { x: 0.45, y: 0.74 });
+  const pRKnee = toScreen(landmarks.right_knee || { x: 0.55, y: 0.74 });
+  const pLAnk = toScreen(landmarks.left_ankle || { x: 0.46, y: 0.91 });
+  const pRAnk = toScreen(landmarks.right_ankle || { x: 0.54, y: 0.91 });
 
-  // Invariant normalization: Prevent inverted vertical geometry
-  if (nose && lHip && nose.y > lHip.y) {
-    nose.y = Math.min(lHip.y - 0.35, 0.20);
-  }
-  if (lAnk && lHip && lAnk.y < lHip.y) {
-    lAnk.y = Math.max(lHip.y + 0.35, 0.90);
-  }
-  if (rAnk && rHip && rAnk.y < rHip.y) {
-    rAnk.y = Math.max(rHip.y + 0.35, 0.90);
-  }
+  // Base anatomical scale factor proportional to subject distance/framing
+  const shSpan = Math.hypot(pRSh.x - pLSh.x, pRSh.y - pLSh.y);
+  const baseUnit = Math.max(shSpan * 0.45, Math.min(w * 0.08, 48));
 
-  // 1. Head & Neck
-  if (nose) {
-    const head = toScreen(nose);
-    const headRx = w * 0.088;
-    const headRy = headRx * 1.28;
+  ctx.save();
+  // Soft glowing body fill that solidifies the silhouette shape for instant readability
+  ctx.fillStyle = isAligned ? 'rgba(0, 255, 136, 0.18)' : 'rgba(251, 191, 36, 0.16)';
+  ctx.strokeStyle = silhouetteColor;
+  ctx.lineWidth = isAligned ? 3.2 : 2.6;
+  ctx.setLineDash([7, 5]);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.shadowColor = glowColor;
+  ctx.shadowBlur = isAligned ? 18 : 10;
+
+  // 1. Torso & Pelvis Contour
+  const midShoulder = { x: (pLSh.x + pRSh.x) / 2, y: (pLSh.y + pRSh.y) / 2 };
+  const midHip = { x: (pLHip.x + pRHip.x) / 2, y: (pLHip.y + pRHip.y) / 2 };
+  const waistY = midShoulder.y * 0.52 + midHip.y * 0.48;
+
+  // Natural human waist: 18% indent relative to shoulder-hip axis
+  const waistWidthRatio = 0.82;
+  const waistLX = midShoulder.x + (pLSh.x - midShoulder.x) * waistWidthRatio;
+  const waistRX = midShoulder.x + (pRSh.x - midShoulder.x) * waistWidthRatio;
+
+  const pelvisDrop = Math.max(12, baseUnit * 0.32);
+  const pelvisBottom = {
+    x: midHip.x,
+    y: Math.max(pLHip.y, pRHip.y) + pelvisDrop,
+  };
+
+  ctx.beginPath();
+  ctx.moveTo(pRSh.x, pRSh.y);
+  ctx.quadraticCurveTo(waistRX, waistY, pRHip.x, pRHip.y);
+  ctx.quadraticCurveTo(pelvisBottom.x, pelvisBottom.y, pLHip.x, pLHip.y);
+  ctx.quadraticCurveTo(waistLX, waistY, pLSh.x, pLSh.y);
+  ctx.quadraticCurveTo(midShoulder.x, midShoulder.y + 4, pRSh.x, pRSh.y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // 2. Head & Neck
+  const headRx = baseUnit * 0.85;
+  const headRy = headRx * 1.28;
+  const headCenter = {
+    x: pNose.x,
+    y: pNose.y - headRy * 0.18,
+  };
+
+  // Natural head tilt derived from shoulder slant
+  const shAngle = Math.atan2(pRSh.y - pLSh.y, pRSh.x - pLSh.x);
+  const headTilt = Math.max(-0.25, Math.min(0.25, shAngle * 0.5));
+
+  // Neck connecting jaw to shoulders
+  const neckTopL = { x: headCenter.x - headRx * 0.38, y: headCenter.y + headRy * 0.72 };
+  const neckTopR = { x: headCenter.x + headRx * 0.38, y: headCenter.y + headRy * 0.72 };
+  const neckBotL = { x: pLSh.x + (midShoulder.x - pLSh.x) * 0.55, y: midShoulder.y };
+  const neckBotR = { x: pRSh.x + (midShoulder.x - pRSh.x) * 0.55, y: midShoulder.y };
+
+  ctx.beginPath();
+  ctx.moveTo(neckTopL.x, neckTopL.y);
+  ctx.lineTo(neckBotL.x, neckBotL.y);
+  ctx.lineTo(neckBotR.x, neckBotR.y);
+  ctx.lineTo(neckTopR.x, neckTopR.y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Head Oval
+  ctx.beginPath();
+  ctx.ellipse(headCenter.x, headCenter.y, headRx, headRy, headTilt, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // 3. Smooth Curved Limbs with True Perpendicular Normals
+  const drawCurvedLimb = (
+    p1: { x: number; y: number },
+    p2: { x: number; y: number },
+    p3: { x: number; y: number },
+    w1: number,
+    w2: number,
+    w3: number,
+    type: 'arm' | 'leg',
+    side: 'left' | 'right'
+  ) => {
+    // Vector 1 (p1 -> p2)
+    const dx1 = p2.x - p1.x;
+    const dy1 = p2.y - p1.y;
+    const len1 = Math.hypot(dx1, dy1) || 1;
+    const n1x = -dy1 / len1;
+    const n1y = dx1 / len1;
+
+    // Vector 2 (p2 -> p3)
+    const dx2 = p3.x - p2.x;
+    const dy2 = p3.y - p2.y;
+    const len2 = Math.hypot(dx2, dy2) || 1;
+    const n2x = -dy2 / len2;
+    const n2y = dx2 / len2;
+    const t2x = dx2 / len2;
+    const t2y = dy2 / len2;
+
+    // Bisector normal at middle joint
+    const sumNx = n1x + n2x;
+    const sumNy = n1y + n2y;
+    const sumLen = Math.hypot(sumNx, sumNy) || 1;
+    const nMidX = sumNx / sumLen;
+    const nMidY = sumNy / sumLen;
+
+    // Miter angle limiter
+    const dot = n1x * n2x + n1y * n2y;
+    const miter = Math.min(1.35, Math.max(0.75, 1 / Math.sqrt(Math.max(0.3, (1 + dot) / 2))));
+    const jointW = w2 * miter;
+
+    // Outer contour points
+    const o1 = { x: p1.x + n1x * w1, y: p1.y + n1y * w1 };
+    const o2 = { x: p2.x + nMidX * jointW, y: p2.y + nMidY * jointW };
+    const o3 = { x: p3.x + n2x * w3, y: p3.y + n2y * w3 };
+
+    // Inner contour points
+    const i3 = { x: p3.x - n2x * w3, y: p3.y - n2y * w3 };
+    const i2 = { x: p2.x - nMidX * jointW, y: p2.y - nMidY * jointW };
+    const i1 = { x: p1.x - n1x * w1, y: p1.y - n1y * w1 };
+
     ctx.beginPath();
-    ctx.ellipse(head.x, head.y, headRx, headRy, 0, 0, Math.PI * 2);
-    ctx.stroke();
+    ctx.moveTo(o1.x, o1.y);
+    ctx.quadraticCurveTo(o2.x, o2.y, o3.x, o3.y);
 
-    if (lSh && rSh) {
-      const pLSh = toScreen(lSh);
-      const pRSh = toScreen(rSh);
-      ctx.beginPath();
-      ctx.moveTo(head.x - headRx * 0.45, head.y + headRy * 0.85);
-      ctx.quadraticCurveTo(head.x - headRx * 0.5, pRSh.y - 5, pRSh.x, pRSh.y);
-      ctx.moveTo(head.x + headRx * 0.45, head.y + headRy * 0.85);
-      ctx.quadraticCurveTo(head.x + headRx * 0.5, pLSh.y - 5, pLSh.x, pLSh.y);
-      ctx.stroke();
+    if (type === 'arm') {
+      // Natural hand capsule extending slightly past wrist
+      const handTip = { x: p3.x + t2x * (w3 * 1.5), y: p3.y + t2y * (w3 * 1.5) };
+      ctx.quadraticCurveTo(
+        handTip.x + n2x * (w3 * 0.6),
+        handTip.y + n2y * (w3 * 0.6),
+        handTip.x,
+        handTip.y
+      );
+      ctx.quadraticCurveTo(
+        handTip.x - n2x * (w3 * 0.6),
+        handTip.y - n2y * (w3 * 0.6),
+        i3.x,
+        i3.y
+      );
+    } else {
+      // Natural foot profile extending slightly outward
+      const footSign = side === 'left' ? -1 : 1;
+      const toeX = p3.x + (t2x * 0.3 + footSign * 0.7) * (w3 * 2.2);
+      const toeY = p3.y + (t2y * 0.3 + 0.7) * (w3 * 1.8) + 4;
+      ctx.lineTo(toeX, toeY);
+      ctx.lineTo(i3.x, i3.y);
     }
-  }
 
-  // 2. Torso Contour (Smooth continuous body from shoulders to hips)
-  if (lSh && rSh && lHip && rHip) {
-    const pLSh = toScreen(lSh);
-    const pRSh = toScreen(rSh);
-    const pLHip = toScreen(lHip);
-    const pRHip = toScreen(rHip);
-
-    const midY = (pLSh.y + pLHip.y) / 2;
-    const rWaistX = pRSh.x * 0.4 + pRHip.x * 0.6;
-    const lWaistX = pLSh.x * 0.4 + pLHip.x * 0.6;
-
-    ctx.beginPath();
-    ctx.moveTo(pRSh.x - 5, pRSh.y);
-    ctx.quadraticCurveTo(rWaistX - 10, midY, pRHip.x - 6, pRHip.y);
-    ctx.lineTo(pLHip.x + 6, pLHip.y);
-    ctx.quadraticCurveTo(lWaistX + 10, midY, pLSh.x + 5, pLSh.y);
+    ctx.quadraticCurveTo(i2.x, i2.y, i1.x, i1.y);
     ctx.closePath();
-    ctx.stroke();
-  }
-
-  // 3. Arms (Smooth continuous sleeves instead of disconnected pills)
-  const armWidth = Math.max(8, w * 0.024);
-  const drawArmContour = (sh: Point2D, elb: Point2D, wr: Point2D) => {
-    const pSh = toScreen(sh);
-    const pElb = toScreen(elb);
-    const pWr = toScreen(wr);
-
-    ctx.beginPath();
-    ctx.moveTo(pSh.x, pSh.y);
-    ctx.lineTo(pElb.x + armWidth * 0.8, pElb.y);
-    ctx.lineTo(pWr.x + armWidth * 0.6, pWr.y);
-    ctx.arc(pWr.x, pWr.y, armWidth * 0.7, 0, Math.PI * 2);
-    ctx.lineTo(pElb.x - armWidth * 0.8, pElb.y);
-    ctx.lineTo(pSh.x, pSh.y + armWidth);
+    ctx.fill();
     ctx.stroke();
   };
 
-  if (lSh && lElb && lWr) drawArmContour(lSh, lElb, lWr);
-  if (rSh && rElb && rWr) drawArmContour(rSh, rElb, rWr);
+  const armW_sh = baseUnit * 0.34;
+  const armW_elb = baseUnit * 0.26;
+  const armW_wr = baseUnit * 0.18;
 
-  // 4. Legs (Smooth continuous leg & foot contours)
-  const legWidth = Math.max(10, w * 0.030);
-  const drawLegContour = (hip: Point2D, knee: Point2D, ank: Point2D, side: 'left' | 'right') => {
-    const pHip = toScreen(hip);
-    const pKnee = toScreen(knee);
-    const pAnk = toScreen(ank);
-    const sign = side === 'right' ? 1 : -1;
+  const legW_hip = baseUnit * 0.44;
+  const legW_knee = baseUnit * 0.34;
+  const legW_ank = baseUnit * 0.22;
 
-    ctx.beginPath();
-    ctx.moveTo(pHip.x, pHip.y);
-    ctx.quadraticCurveTo(pKnee.x + sign * legWidth * 1.1, pKnee.y, pAnk.x + sign * legWidth * 0.8, pAnk.y);
-    ctx.lineTo(pAnk.x + sign * (legWidth * 1.6), pAnk.y + 12);
-    ctx.lineTo(pAnk.x - sign * legWidth * 0.8, pAnk.y + 12);
-    ctx.quadraticCurveTo(pKnee.x - sign * legWidth * 0.7, pKnee.y, pHip.x - sign * 5, pHip.y + 10);
-    ctx.stroke();
-  };
+  // Draw Arms
+  drawCurvedLimb(pLSh, pLElb, pLWr, armW_sh, armW_elb, armW_wr, 'arm', 'left');
+  drawCurvedLimb(pRSh, pRElb, pRWr, armW_sh, armW_elb, armW_wr, 'arm', 'right');
 
-  if (lHip && lKnee && lAnk) drawLegContour(lHip, lKnee, lAnk, 'left');
-  if (rHip && rKnee && rAnk) drawLegContour(rHip, rKnee, rAnk, 'right');
+  // Draw Legs
+  drawCurvedLimb(pLHip, pLKnee, pLAnk, legW_hip, legW_knee, legW_ank, 'leg', 'left');
+  drawCurvedLimb(pRHip, pRKnee, pRAnk, legW_hip, legW_knee, legW_ank, 'leg', 'right');
+
+  ctx.restore();
 }
 
 /**

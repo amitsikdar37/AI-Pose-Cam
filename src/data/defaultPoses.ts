@@ -6,65 +6,7 @@ import editorialCollarImg from '../assets/poses/editorial_collar.jpg';
 import handsHipsImg from '../assets/poses/hands_hips.jpg';
 
 export const DEFAULT_POSES: PosePreset[] = [
-  // 1. The Staircase Railing Lean (Directly tailored for staircases, railings, balconies)
-  {
-    id: 'railing_lean',
-    title: 'The Staircase Railing Lean',
-    vibe: 'Architecture, Staircase & Balcony',
-    category: 'Downtown',
-    framing: 'full_body',
-    archetype: 'railing_lean',
-    leanSide: 'right',
-    directionTip: 'Rest your right arm along the handrail, slip your other hand into your pocket, and cross your front leg casually.',
-    reasoning: 'Creates an effortless editorial line using environmental architecture, providing relaxed posture and elongated legs.',
-    referenceImage: downtownLeanImg,
-    landmarks: {
-      nose: { x: 0.48, y: 0.16 },
-      left_shoulder: { x: 0.38, y: 0.28 },
-      right_shoulder: { x: 0.58, y: 0.30 },
-      left_elbow: { x: 0.32, y: 0.42 },
-      right_elbow: { x: 0.68, y: 0.40 }, // extended to rest on railing
-      left_wrist: { x: 0.36, y: 0.54 }, // in pocket
-      right_wrist: { x: 0.74, y: 0.44 }, // resting on railing
-      left_hip: { x: 0.42, y: 0.56 },
-      right_hip: { x: 0.54, y: 0.56 },
-      left_knee: { x: 0.48, y: 0.73 }, // crossed in front
-      right_knee: { x: 0.52, y: 0.72 }, // supporting leg
-      left_ankle: { x: 0.50, y: 0.91 }, // crossed ankle
-      right_ankle: { x: 0.45, y: 0.92 },
-    },
-  },
-
-  // 2. The Ledge / Staircase Seated Lean
-  {
-    id: 'seated_lean',
-    title: 'The Seated Architectural Lean',
-    vibe: 'Urban Relaxed & Architectural Seated',
-    category: 'Seated',
-    framing: 'seated',
-    archetype: 'seated_lean',
-    leanSide: 'right',
-    directionTip: 'Sit on the steps or ledge, prop one elbow back comfortably, bend your front knee up, and look relaxed toward lens.',
-    reasoning: 'Natural seated posture with asymmetric knee levels that creates rich photographic depth and effortless poise.',
-    referenceImage: downtownStepsImg,
-    landmarks: {
-      nose: { x: 0.48, y: 0.20 },
-      left_shoulder: { x: 0.38, y: 0.34 },
-      right_shoulder: { x: 0.58, y: 0.36 },
-      left_elbow: { x: 0.32, y: 0.48 },
-      right_elbow: { x: 0.66, y: 0.48 },
-      left_wrist: { x: 0.38, y: 0.58 }, // resting on knee
-      right_wrist: { x: 0.68, y: 0.58 }, // propped back
-      left_hip: { x: 0.42, y: 0.62 },
-      right_hip: { x: 0.56, y: 0.62 },
-      left_knee: { x: 0.36, y: 0.70 }, // knee bent up
-      right_knee: { x: 0.64, y: 0.76 }, // relaxed leg
-      left_ankle: { x: 0.38, y: 0.90 },
-      right_ankle: { x: 0.62, y: 0.92 },
-    },
-  },
-
-  // 3. Downtown Steps Chill (User Image 1)
+  // 1. Downtown Steps Chill (User Image 1)
   {
     id: 'downtown_steps',
     title: 'Downtown Steps Chill',

@@ -236,48 +236,47 @@ export class AIVisionService {
     }
 
     const prompt = `
-You are a world-class fashion photographer and portrait creative director.
+You are an expert portrait photographer and creative director.
 Look at this camera viewfinder snapshot.
-Perform a deep visual analysis of:
-1. Environment & Architecture: Look for architectural structures to interact with (e.g. staircase handrails, walls, windows, doorways, steps, ledges, benches, pillars).
-2. The subject: framing (full_body, upper_body, seated), clothing, and vibe.
+1. Scene & Person Analysis:
+   - Check if a person is visible in the frame, their current posture, distance, and framing (close-up/selfie, waist-up portrait, seated, full-body).
+   - Check the surrounding environment, lighting, furniture, props, and setting.
+2. Pose Recommendation:
+   - Suggest the most natural, stylish, and flattering pose tailored specifically to this scene and subject.
+   - Provide a catchy pose title ("poseTitle"), a clear, actionable direction tip ("directionTip"), and vibe ("vibe").
+3. Anatomical Landmarks:
+   - Output 13 normalized 2D coordinates (x: 0.0 left to 1.0 right, y: 0.0 top to 1.0 bottom) representing the recommended pose silhouette.
+   - Natural human proportion guidelines:
+     * Head (nose): near upper area (y between 0.12 and 0.28).
+     * Shoulders: y between 0.24 and 0.40, realistic width (~0.16 to 0.28 apart).
+     * Elbows: y between 0.36 and 0.58.
+     * Wrists: natural placement according to the pose (e.g. resting casually, in pocket, on hip, touching hair, or relaxed).
+     * Hips: y between 0.50 and 0.68.
+     * Knees: y between 0.65 and 0.82 (or bent if seated).
+     * Ankles: y between 0.80 and 0.95.
+     * Biomechanical integrity: Head must be above shoulders, shoulders above hips, hips above knees/ankles.
 
-Select the BEST POSE ARCHETYPE that naturally interacts with this environment:
-- "railing_lean": Near a staircase, railing, balcony, or bridge (model rests forearm/hand along the railing, casual lean, crossed leg).
-- "seated_steps": Sitting casually on stairs, steps, or curb (elbows on knees, forward candid posture).
-- "seated_lean": Sitting on a bench, chair, or ledge (leaning back/side comfortably, one knee raised).
-- "wall_lean": Leaning back or sideways against a wall, window, or pillar (hands in pockets, crossed legs).
-- "editorial_collar": Fashion portrait (one hand adjusting collar, jacket, or sunglasses, angled torso).
-- "selfie_hair": Close-up selfie (hand touching hair crown, tilted head).
-- "hands_hips": Confident streetwear / lifestyle stance (hands on hips, open chest).
-- "walking_candid": Street movement (mid-stride, dynamic walking line).
-- "power_portrait": Folded arms with poise across chest.
-
-Specify which side the lean or railing is on: "left" or "right".
-
-Return ONLY a raw JSON object with this exact structure (NO markdown, NO conversational text):
+Return ONLY a raw JSON object with this exact structure:
 {
-  "archetype": "railing_lean",
-  "leanSide": "right",
   "framing": "full_body",
-  "poseTitle": "The Staircase Railing Lean",
-  "directionTip": "Place your right forearm comfortably along the handrail, cross your front leg, and turn shoulders 20° toward camera.",
-  "sceneDescription": "Staircase with prominent metal handrail, clean diagonal architectural depth",
-  "vibe": "Candid Urban Fashion",
+  "poseTitle": "The Relaxed Room Pose",
+  "directionTip": "Relax your shoulders, shift your weight slightly to one side, and let your hands rest naturally.",
+  "sceneDescription": "Indoor setting with soft lighting",
+  "vibe": "Effortless & Candid",
   "landmarks": {
-    "nose": {"x": 0.48, "y": 0.16},
-    "left_shoulder": {"x": 0.38, "y": 0.28},
-    "right_shoulder": {"x": 0.58, "y": 0.30},
-    "left_elbow": {"x": 0.32, "y": 0.42},
-    "right_elbow": {"x": 0.68, "y": 0.40},
-    "left_wrist": {"x": 0.36, "y": 0.54},
-    "right_wrist": {"x": 0.74, "y": 0.44},
-    "left_hip": {"x": 0.42, "y": 0.56},
-    "right_hip": {"x": 0.54, "y": 0.56},
-    "left_knee": {"x": 0.48, "y": 0.73},
-    "right_knee": {"x": 0.52, "y": 0.72},
-    "left_ankle": {"x": 0.50, "y": 0.91},
-    "right_ankle": {"x": 0.45, "y": 0.92}
+    "nose": {"x": 0.50, "y": 0.18},
+    "left_shoulder": {"x": 0.40, "y": 0.30},
+    "right_shoulder": {"x": 0.60, "y": 0.30},
+    "left_elbow": {"x": 0.35, "y": 0.44},
+    "right_elbow": {"x": 0.65, "y": 0.44},
+    "left_wrist": {"x": 0.38, "y": 0.58},
+    "right_wrist": {"x": 0.62, "y": 0.58},
+    "left_hip": {"x": 0.44, "y": 0.58},
+    "right_hip": {"x": 0.56, "y": 0.58},
+    "left_knee": {"x": 0.45, "y": 0.74},
+    "right_knee": {"x": 0.55, "y": 0.74},
+    "left_ankle": {"x": 0.46, "y": 0.91},
+    "right_ankle": {"x": 0.54, "y": 0.91}
   }
 }
 `;
@@ -535,105 +534,70 @@ Return ONLY a raw JSON object with this exact structure (NO markdown, NO convers
    * If any joint is inverted or corrupted (as in Image 2), it automatically repairs it
    * to maintain anatomical integrity!
    */
-  public sanitizeAndValidateLandmarks(raw: PoseLandmarks, baseline: PoseLandmarks): PoseLandmarks {
+  public sanitizeAndValidateLandmarks(raw?: PoseLandmarks): PoseLandmarks {
+    const defaultStanding: PoseLandmarks = {
+      nose: { x: 0.50, y: 0.18 },
+      left_shoulder: { x: 0.41, y: 0.30 },
+      right_shoulder: { x: 0.59, y: 0.30 },
+      left_elbow: { x: 0.35, y: 0.44 },
+      right_elbow: { x: 0.65, y: 0.44 },
+      left_wrist: { x: 0.38, y: 0.58 },
+      right_wrist: { x: 0.62, y: 0.58 },
+      left_hip: { x: 0.44, y: 0.58 },
+      right_hip: { x: 0.56, y: 0.58 },
+      left_knee: { x: 0.45, y: 0.74 },
+      right_knee: { x: 0.55, y: 0.74 },
+      left_ankle: { x: 0.46, y: 0.91 },
+      right_ankle: { x: 0.54, y: 0.91 },
+    };
+
+    if (!raw) return defaultStanding;
+
     const valid: PoseLandmarks = {};
+    const allJoints: (keyof PoseLandmarks)[] = [
+      'nose', 'left_shoulder', 'right_shoulder',
+      'left_elbow', 'right_elbow', 'left_wrist', 'right_wrist',
+      'left_hip', 'right_hip', 'left_knee', 'right_knee',
+      'left_ankle', 'right_ankle'
+    ];
 
-    for (const k of Object.keys(baseline) as (keyof PoseLandmarks)[]) {
-      valid[k] = { ...baseline[k]! };
-    }
-
-    if (!raw) return valid;
-
-    const rawNose = raw.nose;
-    const rawLHip = raw.left_hip;
-    const rawLAnk = raw.left_ankle;
-
-    // Check for severe vertical inversion
-    if (rawNose && rawLHip && rawNose.y > rawLHip.y) {
-      console.warn('AI landmarks severely inverted (head below hips), using baseline.');
-      return valid;
-    }
-    if (rawLAnk && rawLHip && rawLAnk.y < rawLHip.y) {
-      console.warn('AI landmarks severely inverted (ankles above hips), using baseline.');
-      return valid;
-    }
-
-    for (const k of Object.keys(baseline) as (keyof PoseLandmarks)[]) {
-      const pt = raw[k];
+    for (const j of allJoints) {
+      const pt = raw[j];
       if (pt && typeof pt.x === 'number' && typeof pt.y === 'number' && !isNaN(pt.x) && !isNaN(pt.y)) {
-        const clampedX = Math.max(0.08, Math.min(0.92, pt.x));
-        const clampedY = Math.max(0.08, Math.min(0.95, pt.y));
-
-        const basePt = baseline[k]!;
-        if (Math.hypot(clampedX - basePt.x, clampedY - basePt.y) < 0.35) {
-          valid[k] = { x: clampedX, y: clampedY };
-        }
+        valid[j] = {
+          x: Math.max(0.06, Math.min(0.94, pt.x)),
+          y: Math.max(0.06, Math.min(0.96, pt.y)),
+        };
+      } else {
+        valid[j] = { ...defaultStanding[j]! };
       }
+    }
+
+    // Biomechanical gravity checks (ensure natural upright ordering)
+    const avgShY = (valid.left_shoulder!.y + valid.right_shoulder!.y) / 2;
+    if (valid.nose!.y >= avgShY) {
+      valid.nose!.y = Math.max(0.12, avgShY - 0.12);
+    }
+
+    const avgHipY = (valid.left_hip!.y + valid.right_hip!.y) / 2;
+    if (avgShY >= avgHipY) {
+      valid.left_shoulder!.y = Math.max(0.24, avgHipY - 0.24);
+      valid.right_shoulder!.y = Math.max(0.24, avgHipY - 0.24);
+    }
+
+    if (valid.left_knee && valid.left_knee.y < valid.left_hip!.y) {
+      valid.left_knee.y = valid.left_hip!.y + 0.14;
+    }
+    if (valid.right_knee && valid.right_knee.y < valid.right_hip!.y) {
+      valid.right_knee.y = valid.right_hip!.y + 0.14;
     }
 
     return valid;
   }
 
   private formatResponseAsPosePreset(data: SceneAnalysisResponse, modelUsed: string): PosePreset {
-    const textBlob = `${data.poseTitle || ''} ${data.vibe || ''} ${data.directionTip || ''} ${data.sceneDescription || ''}`.toLowerCase();
-
-    // 1. Determine Archetype
-    let archetype: PoseArchetype = data.archetype || 'general';
-    if (!data.archetype || data.archetype === 'general') {
-      if (textBlob.includes('railing') || textBlob.includes('handrail') || (textBlob.includes('stair') && textBlob.includes('lean'))) {
-        archetype = 'railing_lean';
-      } else if (textBlob.includes('seated') && textBlob.includes('lean')) {
-        archetype = 'seated_lean';
-      } else if (textBlob.includes('step') || textBlob.includes('steps') || (textBlob.includes('sit') && textBlob.includes('stair'))) {
-        archetype = 'seated_steps';
-      } else if (textBlob.includes('wall') || textBlob.includes('window') || textBlob.includes('lean')) {
-        archetype = 'wall_lean';
-      } else if (textBlob.includes('selfie') || textBlob.includes('hair')) {
-        archetype = 'selfie_hair';
-      } else if (textBlob.includes('hip')) {
-        archetype = 'hands_hips';
-      } else if (textBlob.includes('collar') || textBlob.includes('jacket')) {
-        archetype = 'editorial_collar';
-      } else if (textBlob.includes('power') || textBlob.includes('cross')) {
-        archetype = 'power_portrait';
-      } else if (textBlob.includes('walk') || textBlob.includes('stride')) {
-        archetype = 'walking_candid';
-      } else {
-        archetype = 'railing_lean';
-      }
-    }
-
-    // 2. Determine Lean Side
-    let leanSide: 'left' | 'right' = data.leanSide || 'right';
-    if (!data.leanSide) {
-      if (textBlob.includes('left rail') || textBlob.includes('left side') || textBlob.includes('left arm')) {
-        leanSide = 'left';
-      } else {
-        leanSide = 'right';
-      }
-    }
-
-    // 3. Synthesize baseline and sanitize landmarks
-    const baseline = this.synthesizeArchetypeLandmarks(archetype, leanSide, data.framing || 'full_body');
-    const sanitizedLandmarks = this.sanitizeAndValidateLandmarks(data.landmarks as PoseLandmarks, baseline);
-
+    const sanitizedLandmarks = this.sanitizeAndValidateLandmarks(data.landmarks as PoseLandmarks);
     const shortModelName = modelUsed.replace('gemini-', '').toUpperCase();
-
-    // Match reference photo from curated library
-    let matchedPhoto: string | undefined = undefined;
-    if (archetype === 'railing_lean' || archetype === 'wall_lean') {
-      matchedPhoto = DEFAULT_POSES.find((p) => p.id === 'downtown_lean')?.referenceImage;
-    } else if (archetype === 'seated_steps' || archetype === 'seated_lean') {
-      matchedPhoto = DEFAULT_POSES.find((p) => p.id === 'downtown_steps')?.referenceImage;
-    } else if (archetype === 'selfie_hair') {
-      matchedPhoto = DEFAULT_POSES.find((p) => p.id === 'selfie_hair')?.referenceImage;
-    } else if (archetype === 'hands_hips') {
-      matchedPhoto = DEFAULT_POSES.find((p) => p.id === 'hands_hips')?.referenceImage;
-    } else if (archetype === 'editorial_collar') {
-      matchedPhoto = DEFAULT_POSES.find((p) => p.id === 'editorial_collar')?.referenceImage;
-    } else {
-      matchedPhoto = DEFAULT_POSES.find((p) => p.id === 'downtown_lean')?.referenceImage;
-    }
 
     return {
       id: `ai_${Date.now()}`,
@@ -641,11 +605,8 @@ Return ONLY a raw JSON object with this exact structure (NO markdown, NO convers
       vibe: data.vibe || 'AI Scene Director',
       category: 'Editorial',
       framing: data.framing || 'full_body',
-      archetype,
-      leanSide,
-      directionTip: data.directionTip || 'Follow the glowing green skeletal guide.',
+      directionTip: data.directionTip || 'Follow the glowing silhouette guide.',
       reasoning: data.sceneDescription ? `${data.sceneDescription} [${shortModelName}]` : `Bespoke pose direct from ${shortModelName}`,
-      referenceImage: matchedPhoto,
       landmarks: sanitizedLandmarks,
     };
   }
