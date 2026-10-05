@@ -1,4 +1,4 @@
-import type { PosePreset, SceneAnalysisResponse, PoseLandmarks, PoseArchetype } from '../types/camera';
+import type { PosePreset, SceneAnalysisResponse, PoseLandmarks, PoseArchetype, JointName } from '../types/camera';
 import { DEFAULT_POSES } from '../data/defaultPoses';
 
 const API_KEY_STORAGE = 'gemini_api_key';
@@ -239,47 +239,42 @@ export class AIVisionService {
 You are an expert portrait photographer and creative director.
 Look at this camera viewfinder snapshot.
 1. Scene & Person Analysis:
-   - Identify the setting, objects (e.g. chair, couch, bench, steps, railing, wall), and lighting.
-   - Detect if there is a chair/couch/bench/steps to sit on, or a wall/railing to lean against.
-2. Pose Recommendation:
-   - If the camera is pointing at a chair, couch, bench, or steps: recommend a seated pose ("framing": "seated") sitting comfortably on the chair/bench with hands on lap or chair arm!
-   - If in an open area: recommend a standing, walking, or leaning pose ("framing": "full_body").
-   - If close-up selfie: recommend an upper-body portrait pose ("framing": "upper_body").
+   - Identify setting, objects (wall, door, chair, couch, bench, steps, railing, window), lighting, and architecture.
+   - Detect if there is a wall/door/window to lean against, a chair/couch/bench to sit on, or a railing/balcony to lean on.
+2. Pose Archetype Selection:
+   - Pick the best archetype from: "wall_lean", "railing_lean", "seated_chair", "seated_steps", "selfie_hair", "editorial_collar", "hands_hips", "power_portrait", "walking_candid", "general".
+   - If wall/door/window available: choose "wall_lean" (lean back against wall, hands in pockets or relaxed, one leg crossed casually over the other).
+   - If chair/couch/bench available: choose "seated_chair" (sit comfortably, lap flat, knees bent, hands on lap).
+   - If steps/stairs available: choose "seated_steps" (sit on step, knees bent up, elbows on knees).
+   - If railing/balcony available: choose "railing_lean" (lean forearms on railing).
+   - If close-up selfie: choose "selfie_hair" or "editorial_collar".
+   - If open standing: choose "hands_hips", "power_portrait", or "walking_candid".
+   - Provide "leanSide": "left" or "right" depending on where the wall/object is located in the frame.
    - Provide a catchy pose title ("poseTitle"), a clear actionable direction tip ("directionTip"), and vibe ("vibe").
-3. Complete 13 Anatomical Landmarks:
-   - You MUST output all 13 coordinates (x: 0.0 left to 1.0 right, y: 0.0 top to 1.0 bottom) representing the recommended human pose silhouette.
-   - For a SEATED POSE ("framing": "seated"):
-     * Head (nose): y between 0.18 and 0.25
-     * Shoulders: y between 0.32 and 0.40, width ~0.24 to 0.32
-     * Elbows: y between 0.46 and 0.54
-     * Wrists (resting on lap or chair arm): y between 0.58 and 0.65
-     * Hips (seated on chair seat): y between 0.60 and 0.68
-     * Knees (bent forward at front edge of seat, forming lap): y between 0.70 and 0.78
-     * Ankles (feet resting on floor): y between 0.88 and 0.94
-   - For a STANDING POSE ("framing": "full_body"):
-     * Head near 0.16, shoulders near 0.28, hips near 0.56, knees near 0.74, ankles near 0.92.
 
 Return ONLY a raw JSON object with this exact structure:
 {
-  "framing": "seated",
-  "poseTitle": "The Casual Chair Sit",
-  "directionTip": "Sit comfortably on the chair, rest your hands gently on your lap, and look relaxed toward the lens.",
-  "sceneDescription": "Indoor scene with chair",
-  "vibe": "Effortless & Relaxed",
+  "archetype": "wall_lean",
+  "leanSide": "right",
+  "framing": "full_body",
+  "poseTitle": "The Standing Wall Lean",
+  "directionTip": "Stand with your back lightly leaning against the wall, hands in front pockets, one leg crossed casually over the other.",
+  "sceneDescription": "Indoor setting with wall",
+  "vibe": "Effortless & Natural",
   "landmarks": {
-    "nose": {"x": 0.50, "y": 0.22},
-    "left_shoulder": {"x": 0.38, "y": 0.36},
-    "right_shoulder": {"x": 0.62, "y": 0.36},
-    "left_elbow": {"x": 0.32, "y": 0.50},
-    "right_elbow": {"x": 0.68, "y": 0.50},
-    "left_wrist": {"x": 0.40, "y": 0.62},
-    "right_wrist": {"x": 0.60, "y": 0.62},
-    "left_hip": {"x": 0.42, "y": 0.64},
-    "right_hip": {"x": 0.58, "y": 0.64},
-    "left_knee": {"x": 0.40, "y": 0.76},
-    "right_knee": {"x": 0.60, "y": 0.76},
-    "left_ankle": {"x": 0.42, "y": 0.92},
-    "right_ankle": {"x": 0.58, "y": 0.92}
+    "nose": {"x": 0.52, "y": 0.15},
+    "left_shoulder": {"x": 0.59, "y": 0.27},
+    "right_shoulder": {"x": 0.44, "y": 0.27},
+    "left_elbow": {"x": 0.63, "y": 0.41},
+    "right_elbow": {"x": 0.39, "y": 0.41},
+    "left_wrist": {"x": 0.56, "y": 0.53},
+    "right_wrist": {"x": 0.42, "y": 0.53},
+    "left_hip": {"x": 0.54, "y": 0.54},
+    "right_hip": {"x": 0.45, "y": 0.54},
+    "left_knee": {"x": 0.52, "y": 0.72},
+    "right_knee": {"x": 0.44, "y": 0.70},
+    "left_ankle": {"x": 0.48, "y": 0.90},
+    "right_ankle": {"x": 0.43, "y": 0.91}
   }
 }
 `;
@@ -434,9 +429,61 @@ Return ONLY a raw JSON object with this exact structure:
   }
 
   /**
+   * Robust Archetype & Posture Classifier:
+   * Inspects model output + semantic keywords across title, tip, and scene description.
+   * Accurately determines the posture archetype and orientation side.
+   */
+  public detectArchetype(data: Partial<SceneAnalysisResponse>): { archetype: PoseArchetype; leanSide: 'left' | 'right' } {
+    const rawArchetype = data.archetype;
+    const combined = `${data.poseTitle || ''} ${data.directionTip || ''} ${data.sceneDescription || ''} ${data.vibe || ''}`.toLowerCase();
+    const leanSide: 'left' | 'right' = data.leanSide === 'left' || /left wall|lean.*left|left side|left shoulder/i.test(combined) ? 'left' : 'right';
+
+    if (rawArchetype && rawArchetype !== 'general') {
+      const validArchetypes: PoseArchetype[] = [
+        'wall_lean', 'railing_lean', 'seated_steps', 'seated_lean',
+        'selfie_hair', 'hands_hips', 'editorial_collar', 'power_portrait',
+        'walking_candid', 'general'
+      ];
+      if (validArchetypes.includes(rawArchetype)) {
+        return { archetype: rawArchetype, leanSide };
+      }
+    }
+
+    if (/stair|steps|curb|staircase/i.test(combined)) {
+      return { archetype: 'seated_steps', leanSide };
+    }
+    if (/chair|couch|sofa|bench|stool|lap|seated/i.test(combined) || data.framing === 'seated') {
+      return { archetype: 'seated_lean', leanSide };
+    }
+    if (/wall|door|window|lean.*wall|cross.*leg|pocket/i.test(combined)) {
+      return { archetype: 'wall_lean', leanSide };
+    }
+    if (/railing|balcony|banister|ledge|counter|balustrade/i.test(combined)) {
+      return { archetype: 'railing_lean', leanSide };
+    }
+    if (/hair|crown|run.*finger|brush.*hair/i.test(combined)) {
+      return { archetype: 'selfie_hair', leanSide };
+    }
+    if (/collar|jaw|chin|neck|touch.*face/i.test(combined)) {
+      return { archetype: 'editorial_collar', leanSide };
+    }
+    if (/hand.*hip|hands.*waist|akimbo|confident stance/i.test(combined)) {
+      return { archetype: 'hands_hips', leanSide };
+    }
+    if (/cross.*arm|folded.*arm|cross.*chest|power portrait/i.test(combined)) {
+      return { archetype: 'power_portrait', leanSide };
+    }
+    if (/walk|stride|step forward|step|in motion/i.test(combined)) {
+      return { archetype: 'walking_candid', leanSide };
+    }
+
+    return { archetype: 'general', leanSide };
+  }
+
+  /**
    * Synthesizes anatomically sound, verified baseline keypoints for a given archetype and side.
-   * This guarantees that even if an LLM hallucinates, the pose wireframe is 100% realistic,
-   * natural, and matches the posture instructions perfectly.
+   * Guarantees that the pose wireframe matches the posture instructions 100% (e.g. crossed legs,
+   * hands in pockets, seated lap, hands on hips).
    */
   public synthesizeArchetypeLandmarks(
     archetype: PoseArchetype,
@@ -445,71 +492,95 @@ Return ONLY a raw JSON object with this exact structure:
   ): PoseLandmarks {
     const isRight = side === 'right';
 
+    // 1. Wall Lean: Leaning back, hands in pockets, one leg casually crossed over the other!
+    if (archetype === 'wall_lean') {
+      const base = DEFAULT_POSES.find((p) => p.id === 'downtown_lean')!.landmarks;
+      if (!isRight) {
+        // Mirror horizontally across x = 0.50
+        const mirrored: PoseLandmarks = {};
+        for (const [key, pt] of Object.entries(base)) {
+          if (!pt) continue;
+          const swappedKey = key.startsWith('left_')
+            ? key.replace('left_', 'right_')
+            : key.startsWith('right_')
+            ? key.replace('right_', 'left_')
+            : key;
+          mirrored[swappedKey as JointName] = { x: Math.round((1.0 - pt.x) * 100) / 100, y: pt.y };
+        }
+        return mirrored;
+      }
+      return { ...base };
+    }
+
+    // 2. Seated Chair / Bench: Lap flat, knees bent forward, hands resting on lap, feet on floor
+    if (archetype === 'seated_lean') {
+      return {
+        nose: { x: 0.50, y: 0.22 },
+        left_shoulder: { x: 0.38, y: 0.36 },
+        right_shoulder: { x: 0.62, y: 0.36 },
+        left_elbow: { x: 0.32, y: 0.50 },
+        right_elbow: { x: 0.68, y: 0.50 },
+        left_wrist: { x: 0.40, y: 0.62 },
+        right_wrist: { x: 0.60, y: 0.62 },
+        left_hip: { x: 0.42, y: 0.64 },
+        right_hip: { x: 0.58, y: 0.64 },
+        left_knee: { x: 0.40, y: 0.76 },
+        right_knee: { x: 0.60, y: 0.76 },
+        left_ankle: { x: 0.42, y: 0.92 },
+        right_ankle: { x: 0.58, y: 0.92 },
+      };
+    }
+
+    // 3. Seated on Steps / Stairs: Knees bent up, elbows on knees, hands under chin
+    if (archetype === 'seated_steps') {
+      return { ...DEFAULT_POSES.find((p) => p.id === 'downtown_steps')!.landmarks };
+    }
+
+    // 4. Railing Lean: Forearms resting on railing
     if (archetype === 'railing_lean') {
       return {
         nose: { x: isRight ? 0.48 : 0.52, y: 0.16 },
         left_shoulder: { x: isRight ? 0.38 : 0.42, y: isRight ? 0.28 : 0.30 },
         right_shoulder: { x: isRight ? 0.58 : 0.62, y: isRight ? 0.30 : 0.28 },
-        left_elbow: { x: isRight ? 0.32 : 0.30, y: isRight ? 0.42 : 0.40 },
-        right_elbow: { x: isRight ? 0.70 : 0.68, y: isRight ? 0.40 : 0.42 },
-        left_wrist: { x: isRight ? 0.36 : 0.24, y: isRight ? 0.54 : 0.44 },
-        right_wrist: { x: isRight ? 0.76 : 0.64, y: isRight ? 0.44 : 0.54 },
-        left_hip: { x: isRight ? 0.42 : 0.46, y: 0.56 },
-        right_hip: { x: isRight ? 0.54 : 0.58, y: 0.56 },
-        left_knee: { x: isRight ? 0.48 : 0.46, y: 0.73 },
-        right_knee: { x: isRight ? 0.52 : 0.54, y: 0.72 },
-        left_ankle: { x: isRight ? 0.50 : 0.44, y: 0.91 },
-        right_ankle: { x: isRight ? 0.45 : 0.55, y: 0.92 },
+        left_elbow: { x: isRight ? 0.32 : 0.30, y: 0.42 },
+        right_elbow: { x: isRight ? 0.70 : 0.68, y: 0.42 },
+        left_wrist: { x: isRight ? 0.36 : 0.24, y: 0.46 },
+        right_wrist: { x: isRight ? 0.76 : 0.64, y: 0.46 },
+        left_hip: { x: isRight ? 0.42 : 0.46, y: 0.58 },
+        right_hip: { x: isRight ? 0.54 : 0.58, y: 0.58 },
+        left_knee: { x: isRight ? 0.46 : 0.44, y: 0.74 },
+        right_knee: { x: isRight ? 0.54 : 0.56, y: 0.74 },
+        left_ankle: { x: isRight ? 0.47 : 0.43, y: 0.92 },
+        right_ankle: { x: isRight ? 0.53 : 0.57, y: 0.92 },
       };
     }
 
-    if (archetype === 'seated_lean') {
-      return {
-        nose: { x: isRight ? 0.48 : 0.52, y: 0.20 },
-        left_shoulder: { x: isRight ? 0.38 : 0.42, y: 0.34 },
-        right_shoulder: { x: isRight ? 0.58 : 0.62, y: 0.35 },
-        left_elbow: { x: isRight ? 0.32 : 0.32, y: 0.48 },
-        right_elbow: { x: isRight ? 0.68 : 0.68, y: 0.48 },
-        left_wrist: { x: isRight ? 0.38 : 0.28, y: isRight ? 0.58 : 0.62 },
-        right_wrist: { x: isRight ? 0.72 : 0.62, y: isRight ? 0.62 : 0.58 },
-        left_hip: { x: 0.42, y: 0.62 },
-        right_hip: { x: 0.56, y: 0.62 },
-        left_knee: { x: isRight ? 0.35 : 0.62, y: isRight ? 0.69 : 0.76 },
-        right_knee: { x: isRight ? 0.62 : 0.35, y: isRight ? 0.76 : 0.69 },
-        left_ankle: { x: isRight ? 0.38 : 0.64, y: isRight ? 0.90 : 0.93 },
-        right_ankle: { x: isRight ? 0.64 : 0.38, y: isRight ? 0.93 : 0.90 },
-      };
-    }
-
-    if (archetype === 'seated_steps') {
-      return { ...DEFAULT_POSES.find((p) => p.id === 'downtown_steps')!.landmarks };
-    }
-
-    if (archetype === 'wall_lean') {
-      return { ...DEFAULT_POSES.find((p) => p.id === 'downtown_lean')!.landmarks };
-    }
-
+    // 5. Selfie Hair Touch: Hand reaching into hair crown
     if (archetype === 'selfie_hair') {
       return { ...DEFAULT_POSES.find((p) => p.id === 'selfie_hair')!.landmarks };
     }
 
+    // 6. Confident Hands on Hips: Akimbo arms, chest open
     if (archetype === 'hands_hips') {
       return { ...DEFAULT_POSES.find((p) => p.id === 'hands_hips')!.landmarks };
     }
 
+    // 7. Editorial Collarbone: Hand at jaw/collarbone
     if (archetype === 'editorial_collar') {
       return { ...DEFAULT_POSES.find((p) => p.id === 'editorial_collar')!.landmarks };
     }
 
+    // 8. Power Portrait: Crossed folded arms across chest
     if (archetype === 'power_portrait') {
       return { ...DEFAULT_POSES.find((p) => p.id === 'power_portrait')!.landmarks };
     }
 
+    // 9. Walking Candid: One leg forward, one leg back, arms swinging
     if (archetype === 'walking_candid') {
       return { ...DEFAULT_POSES.find((p) => p.id === 'golden_hour_candid')!.landmarks };
     }
 
-    // Default confident standing posture
+    // 10. General Relaxed Standing (Contrapposto with natural weight shift)
     return {
       nose: { x: 0.50, y: 0.16 },
       left_shoulder: { x: 0.60, y: 0.28 },
@@ -653,24 +724,30 @@ Return ONLY a raw JSON object with this exact structure:
   }
 
   private formatResponseAsPosePreset(data: SceneAnalysisResponse, modelUsed: string): PosePreset {
-    const isSeated =
-      data.framing === 'seated' ||
-      /sit|chair|bench|lap|steps|stool|sofa|couch/i.test(
-        `${data.poseTitle || ''} ${data.directionTip || ''} ${data.sceneDescription || ''}`
-      );
-
-    const sanitizedLandmarks = this.sanitizeAndValidateLandmarks(data.landmarks as PoseLandmarks, isSeated);
+    const { archetype, leanSide } = this.detectArchetype(data);
     const shortModelName = modelUsed.replace('gemini-', '').toUpperCase();
+
+    // Synthesize verified, anatomically accurate landmarks matching the exact posture
+    // (e.g. crossed legs for wall lean, hands on lap for chair sit, akimbo for hands on hips)
+    const verifiedLandmarks = this.synthesizeArchetypeLandmarks(archetype, leanSide, data.framing);
+
+    const framing = (archetype === 'seated_lean' || archetype === 'seated_steps')
+      ? 'seated'
+      : (archetype === 'selfie_hair' || archetype === 'editorial_collar')
+      ? 'upper_body'
+      : (data.framing || 'full_body');
 
     return {
       id: `ai_${Date.now()}`,
       title: data.poseTitle || 'Bespoke AI Pose',
       vibe: data.vibe || 'AI Scene Director',
       category: 'Editorial',
-      framing: isSeated ? 'seated' : data.framing || 'full_body',
+      framing,
+      archetype,
+      leanSide,
       directionTip: data.directionTip || 'Follow the glowing silhouette guide.',
       reasoning: data.sceneDescription ? `${data.sceneDescription} [${shortModelName}]` : `Bespoke pose direct from ${shortModelName}`,
-      landmarks: sanitizedLandmarks,
+      landmarks: verifiedLandmarks,
     };
   }
 

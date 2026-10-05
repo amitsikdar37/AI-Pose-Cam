@@ -1,5 +1,25 @@
 import React, { useEffect, useRef } from 'react';
-import type { AlignmentResult, JointName, Point2D, PoseLandmarks, PosePreset, OrientationAngle } from '../types/camera';
+import type { AlignmentResult, JointName, Point2D, PoseLandmarks, PosePreset, OrientationAngle, PoseArchetype } from '../types/camera';
+
+/**
+ * Intelligent posture classifier fallback for overlays:
+ * Detects the intended pose archetype from title, tip, and reasoning.
+ */
+function detectArchetypeFromPose(pose?: PosePreset | null): PoseArchetype {
+  if (!pose) return 'general';
+  if (pose.archetype && pose.archetype !== 'general') return pose.archetype;
+  const text = `${pose.title} ${pose.directionTip} ${pose.reasoning || ''} ${pose.vibe || ''}`.toLowerCase();
+  if (/stair|steps|curb|staircase/i.test(text)) return 'seated_steps';
+  if (/chair|couch|sofa|bench|stool|lap|seated/i.test(text) || pose.framing === 'seated') return 'seated_lean';
+  if (/wall|door|window|lean.*wall|cross.*leg|pocket/i.test(text)) return 'wall_lean';
+  if (/railing|balcony|banister|ledge|counter/i.test(text)) return 'railing_lean';
+  if (/hair|crown|run.*finger/i.test(text)) return 'selfie_hair';
+  if (/collar|jaw|chin|neck|touch.*face/i.test(text)) return 'editorial_collar';
+  if (/hand.*hip|hands.*waist|akimbo/i.test(text)) return 'hands_hips';
+  if (/cross.*arm|folded.*arm|cross.*chest/i.test(text)) return 'power_portrait';
+  if (/walk|stride|step/i.test(text)) return 'walking_candid';
+  return 'general';
+}
 
 interface SkeletalOverlayProps {
   currentPose?: PosePreset | null;
@@ -163,6 +183,7 @@ export const SkeletalOverlay: React.FC<SkeletalOverlayProps> = ({
     ctx.strokeStyle = silhouetteColor;
     ctx.shadowColor = glowColor;
     ctx.shadowBlur = isAligned ? 18 : 10;
+    ctx.fillStyle = isAligned ? 'rgba(0, 255, 136, 0.18)' : 'rgba(251, 191, 36, 0.16)';
 
     // Apply Isotropic Canvas Transformation for Landscape:
     // Rotating via 2D affine matrix guarantees ZERO aspect ratio warping,
@@ -188,21 +209,27 @@ export const SkeletalOverlay: React.FC<SkeletalOverlayProps> = ({
     // beautifully regardless of portrait or landscape container aspect ratio.
     const baseDim = Math.min(renderW, renderH);
     const poseId = currentPose?.id || '';
+    const archetype = currentPose?.archetype || detectArchetypeFromPose(currentPose);
+    const leanSide = currentPose?.leanSide || (/left wall|lean.*left|left side|left shoulder/i.test(`${currentPose?.title || ''} ${currentPose?.directionTip || ''}`) ? 'left' : 'right');
 
-    if (poseId === 'downtown_steps') {
+    if (poseId === 'downtown_steps' || archetype === 'seated_steps') {
       drawDowntownStepsSilhouette(ctx, toScreen, baseDim, renderH, isMirrored);
-    } else if (poseId === 'selfie_hair') {
+    } else if (poseId === 'selfie_hair' || archetype === 'selfie_hair') {
       drawSelfieHairSilhouette(ctx, toScreen, baseDim, renderH, isMirrored);
-    } else if (poseId === 'downtown_lean') {
-      drawDowntownLeanSilhouette(ctx, toScreen, baseDim, renderH, isMirrored);
-    } else if (poseId === 'hands_hips') {
+    } else if (poseId === 'downtown_lean' || archetype === 'wall_lean') {
+      drawDowntownLeanSilhouette(ctx, toScreen, baseDim, renderH, isMirrored, leanSide);
+    } else if (poseId === 'hands_hips' || archetype === 'hands_hips') {
       drawHandsHipsSilhouette(ctx, toScreen, baseDim, renderH, isMirrored);
-    } else if (poseId === 'editorial_collar') {
+    } else if (poseId === 'editorial_collar' || archetype === 'editorial_collar') {
       drawEditorialCollarSilhouette(ctx, toScreen, baseDim, renderH, isMirrored);
-    } else if (poseId === 'power_portrait') {
+    } else if (poseId === 'power_portrait' || archetype === 'power_portrait') {
       drawPowerPortraitSilhouette(ctx, toScreen, baseDim, renderH, isMirrored);
-    } else if (poseId === 'golden_hour_candid') {
+    } else if (poseId === 'golden_hour_candid' || archetype === 'walking_candid') {
       drawWalkingCandidSilhouette(ctx, toScreen, baseDim, renderH, isMirrored);
+    } else if (archetype === 'railing_lean') {
+      drawRailingLeanSilhouette(ctx, toScreen, baseDim, renderH, isMirrored, leanSide);
+    } else if (archetype === 'seated_lean' || currentPose?.framing === 'seated') {
+      drawSeatedChairSilhouette(ctx, toScreen, baseDim, renderH, isMirrored);
     } else {
       // Dynamic AI Pose or Bespoke Pose directly from landmarks
       drawAnatomicalHumanSilhouette(
@@ -378,7 +405,7 @@ function drawSelfieHairSilhouette(
 }
 
 /**
- * 3. Downtown Wall Lean (User Screenshot 3):
+ * 3. Downtown Wall Lean (User Screenshot 3 & Wall Lean):
  * Standing lean against vertical wall, hands in front pockets, legs crossed.
  */
 function drawDowntownLeanSilhouette(
@@ -386,42 +413,28 @@ function drawDowntownLeanSilhouette(
   toScreen: (pt: Point2D) => { x: number; y: number },
   w: number,
   _h: number,
-  isMirrored: boolean
+  isMirrored: boolean,
+  leanSide: 'left' | 'right' = 'right'
 ) {
-  const headCenter = toScreen({ x: 0.52, y: 0.15 });
+  // If leanSide is 'left', mirror X across 0.50
+  const flip = (p: Point2D): Point2D => (leanSide === 'left' ? { x: 1.0 - p.x, y: p.y } : p);
+  const toSc = (p: Point2D) => toScreen(flip(p));
+
+  const headCenter = toSc({ x: 0.52, y: 0.15 });
   const headRx = w * 0.085;
   const headRy = headRx * 1.28;
 
   // Head
   ctx.beginPath();
   ctx.ellipse(headCenter.x, headCenter.y, headRx, headRy, 0, 0, Math.PI * 2);
+  ctx.fill();
   ctx.stroke();
 
   // Shoulders & Torso Leaning
-  const lSh = toScreen({ x: 0.60, y: 0.27 });
-  const rSh = toScreen({ x: 0.44, y: 0.27 });
-  const lHip = toScreen({ x: 0.55, y: 0.55 });
-  const rHip = toScreen({ x: 0.45, y: 0.55 });
-
-  // Left arm into pocket
-  const lElb = toScreen({ x: 0.64, y: 0.41 });
-  const lPock = toScreen({ x: 0.57, y: 0.53 });
-  ctx.beginPath();
-  ctx.moveTo(headCenter.x + (isMirrored ? -headRx * 0.8 : headRx * 0.8), headCenter.y + headRy * 0.7);
-  ctx.quadraticCurveTo(lSh.x, lSh.y - 5, lSh.x + 10, lSh.y + 8);
-  ctx.lineTo(lElb.x + 10, lElb.y);
-  ctx.quadraticCurveTo(lElb.x, lElb.y + 12, lPock.x + 8, lPock.y);
-  ctx.stroke();
-
-  // Right arm into pocket
-  const rElb = toScreen({ x: 0.38, y: 0.41 });
-  const rPock = toScreen({ x: 0.43, y: 0.53 });
-  ctx.beginPath();
-  ctx.moveTo(headCenter.x - (isMirrored ? -headRx * 0.8 : headRx * 0.8), headCenter.y + headRy * 0.7);
-  ctx.quadraticCurveTo(rSh.x, rSh.y - 5, rSh.x - 10, rSh.y + 8);
-  ctx.lineTo(rElb.x - 10, rElb.y);
-  ctx.quadraticCurveTo(rElb.x, rElb.y + 12, rPock.x - 8, rPock.y);
-  ctx.stroke();
+  const lSh = toSc({ x: 0.60, y: 0.27 });
+  const rSh = toSc({ x: 0.44, y: 0.27 });
+  const lHip = toSc({ x: 0.55, y: 0.55 });
+  const rHip = toSc({ x: 0.45, y: 0.55 });
 
   // Torso outline
   ctx.beginPath();
@@ -429,29 +442,278 @@ function drawDowntownLeanSilhouette(
   ctx.lineTo(rHip.x, rHip.y);
   ctx.lineTo(lHip.x, lHip.y);
   ctx.lineTo(lSh.x, lSh.y + 10);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Left arm into pocket
+  const lElb = toSc({ x: 0.64, y: 0.41 });
+  const lPock = toSc({ x: 0.57, y: 0.53 });
+  ctx.beginPath();
+  ctx.moveTo(headCenter.x + (isMirrored ? -headRx * 0.8 : headRx * 0.8), headCenter.y + headRy * 0.7);
+  ctx.quadraticCurveTo(lSh.x, lSh.y - 5, lSh.x + 10, lSh.y + 8);
+  ctx.lineTo(lElb.x + 10, lElb.y);
+  ctx.quadraticCurveTo(lElb.x, lElb.y + 12, lPock.x + 8, lPock.y);
+  ctx.lineTo(lPock.x - 8, lPock.y);
+  ctx.quadraticCurveTo(lElb.x - 10, lElb.y, lSh.x - 10, lSh.y + 8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Right arm into pocket
+  const rElb = toSc({ x: 0.38, y: 0.41 });
+  const rPock = toSc({ x: 0.43, y: 0.53 });
+  ctx.beginPath();
+  ctx.moveTo(headCenter.x - (isMirrored ? -headRx * 0.8 : headRx * 0.8), headCenter.y + headRy * 0.7);
+  ctx.quadraticCurveTo(rSh.x, rSh.y - 5, rSh.x - 10, rSh.y + 8);
+  ctx.lineTo(rElb.x - 10, rElb.y);
+  ctx.quadraticCurveTo(rElb.x, rElb.y + 12, rPock.x - 8, rPock.y);
+  ctx.lineTo(rPock.x + 8, rPock.y);
+  ctx.quadraticCurveTo(rElb.x + 10, rElb.y, rSh.x + 10, rSh.y + 8);
+  ctx.closePath();
+  ctx.fill();
   ctx.stroke();
 
   // Crossed Legs (One supporting leg, one leg crossed in front at ankle)
-  const lKnee = toScreen({ x: 0.52, y: 0.72 });
-  const lAnkle = toScreen({ x: 0.47, y: 0.90 }); // crossed over
-  const rKnee = toScreen({ x: 0.44, y: 0.70 });
-  const rAnkle = toScreen({ x: 0.43, y: 0.91 }); // straight
+  const lKnee = toSc({ x: 0.52, y: 0.72 });
+  const lAnkle = toSc({ x: 0.47, y: 0.90 }); // crossed over
+  const rKnee = toSc({ x: 0.44, y: 0.70 });
+  const rAnkle = toSc({ x: 0.43, y: 0.91 }); // straight
 
-  // Crossed front leg
+  // Back supporting leg (drawn first so crossed leg sits cleanly in front)
   ctx.beginPath();
-  ctx.moveTo(lHip.x, lHip.y);
-  ctx.quadraticCurveTo(lKnee.x + 15, lKnee.y, lAnkle.x + 10, lAnkle.y);
-  ctx.lineTo(lAnkle.x - 12, lAnkle.y);
-  ctx.quadraticCurveTo(lKnee.x - 10, lKnee.y, lHip.x - 12, lHip.y);
+  ctx.moveTo(rHip.x, rHip.y);
+  ctx.lineTo(rKnee.x - 11, rKnee.y);
+  ctx.lineTo(rAnkle.x - 11, rAnkle.y);
+  ctx.lineTo(rAnkle.x + 11, rAnkle.y);
+  ctx.lineTo(rKnee.x + 11, rKnee.y);
+  ctx.closePath();
+  ctx.fill();
   ctx.stroke();
 
-  // Back supporting leg
+  // Crossed front leg (overlapping cleanly in front)
+  ctx.beginPath();
+  ctx.moveTo(lHip.x, lHip.y);
+  ctx.quadraticCurveTo(lKnee.x + 14, lKnee.y, lAnkle.x + 11, lAnkle.y);
+  ctx.lineTo(lAnkle.x - 11, lAnkle.y);
+  ctx.quadraticCurveTo(lKnee.x - 11, lKnee.y, lHip.x - 11, lHip.y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+}
+
+/**
+ * Seated Chair / Bench Silhouette:
+ * Natural seated human: upright torso, hands on lap, thighs extending across seat,
+ * 90-degree bent knees at seat edge, calves dropping down, feet flat on floor.
+ */
+function drawSeatedChairSilhouette(
+  ctx: CanvasRenderingContext2D,
+  toScreen: (pt: Point2D) => { x: number; y: number },
+  w: number,
+  _h: number,
+  _isMirrored: boolean
+) {
+  const headCenter = toScreen({ x: 0.50, y: 0.22 });
+  const headRx = w * 0.088;
+  const headRy = headRx * 1.28;
+
+  // Head
+  ctx.beginPath();
+  ctx.ellipse(headCenter.x, headCenter.y, headRx, headRy, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // Neck
+  const nL = { x: headCenter.x - headRx * 0.35, y: headCenter.y + headRy * 0.75 };
+  const nR = { x: headCenter.x + headRx * 0.35, y: headCenter.y + headRy * 0.75 };
+  const lSh = toScreen({ x: 0.62, y: 0.36 });
+  const rSh = toScreen({ x: 0.38, y: 0.36 });
+
+  ctx.beginPath();
+  ctx.moveTo(nL.x, nL.y);
+  ctx.quadraticCurveTo((nL.x + rSh.x) / 2, (nL.y + rSh.y) / 2, rSh.x, rSh.y);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(nR.x, nR.y);
+  ctx.quadraticCurveTo((nR.x + lSh.x) / 2, (nR.y + lSh.y) / 2, lSh.x, lSh.y);
+  ctx.stroke();
+
+  // Torso seated upright on chair
+  const lHip = toScreen({ x: 0.58, y: 0.64 });
+  const rHip = toScreen({ x: 0.42, y: 0.64 });
+  ctx.beginPath();
+  ctx.moveTo(rSh.x, rSh.y + 10);
+  ctx.lineTo(rHip.x, rHip.y);
+  ctx.lineTo(lHip.x, lHip.y);
+  ctx.lineTo(lSh.x, lSh.y + 10);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Arms: elbows at side, hands resting gently on lap / chair arms
+  const lElb = toScreen({ x: 0.68, y: 0.50 });
+  const rElb = toScreen({ x: 0.32, y: 0.50 });
+  const lHand = toScreen({ x: 0.60, y: 0.62 });
+  const rHand = toScreen({ x: 0.40, y: 0.62 });
+
+  // Left arm
+  ctx.beginPath();
+  ctx.moveTo(lSh.x + 8, lSh.y + 8);
+  ctx.lineTo(lElb.x + 10, lElb.y);
+  ctx.lineTo(lHand.x + 8, lHand.y);
+  ctx.arc(lHand.x, lHand.y, 8, 0, Math.PI * 2);
+  ctx.lineTo(lElb.x - 8, lElb.y);
+  ctx.lineTo(lSh.x - 8, lSh.y + 8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Right arm
+  ctx.beginPath();
+  ctx.moveTo(rSh.x - 8, rSh.y + 8);
+  ctx.lineTo(rElb.x - 10, rElb.y);
+  ctx.lineTo(rHand.x - 8, rHand.y);
+  ctx.arc(rHand.x, rHand.y, 8, 0, Math.PI * 2);
+  ctx.lineTo(rElb.x + 8, rElb.y);
+  ctx.lineTo(rSh.x + 8, rSh.y + 8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Thighs / Lap: extending forward across chair seat to knees
+  const lKnee = toScreen({ x: 0.60, y: 0.76 });
+  const rKnee = toScreen({ x: 0.40, y: 0.76 });
+  const lFoot = toScreen({ x: 0.58, y: 0.92 });
+  const rFoot = toScreen({ x: 0.42, y: 0.92 });
+
+  // Left leg: thigh on seat -> bent knee -> calf to floor
+  ctx.beginPath();
+  ctx.moveTo(lHip.x, lHip.y);
+  ctx.lineTo(lKnee.x + 12, lKnee.y - 4);
+  ctx.lineTo(lKnee.x + 12, lKnee.y + 8);
+  ctx.lineTo(lFoot.x + 10, lFoot.y);
+  ctx.lineTo(lFoot.x - 10, lFoot.y);
+  ctx.lineTo(lKnee.x - 10, lKnee.y + 8);
+  ctx.lineTo(lKnee.x - 10, lKnee.y - 4);
+  ctx.lineTo(lHip.x - 10, lHip.y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Right leg: thigh on seat -> bent knee -> calf to floor
+  ctx.beginPath();
+  ctx.moveTo(rHip.x, rHip.y);
+  ctx.lineTo(rKnee.x - 12, rKnee.y - 4);
+  ctx.lineTo(rKnee.x - 12, rKnee.y + 8);
+  ctx.lineTo(rFoot.x - 10, rFoot.y);
+  ctx.lineTo(rFoot.x + 10, rFoot.y);
+  ctx.lineTo(rKnee.x + 10, rKnee.y + 8);
+  ctx.lineTo(rKnee.x + 10, rKnee.y - 4);
+  ctx.lineTo(rHip.x + 10, rHip.y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+}
+
+/**
+ * Railing / Balcony Lean Silhouette:
+ * Upper body leaning forward on railing with forearms resting horizontally.
+ */
+function drawRailingLeanSilhouette(
+  ctx: CanvasRenderingContext2D,
+  toScreen: (pt: Point2D) => { x: number; y: number },
+  w: number,
+  _h: number,
+  isMirrored: boolean,
+  leanSide: 'left' | 'right' = 'right'
+) {
+  const flip = (p: Point2D): Point2D => (leanSide === 'left' ? { x: 1.0 - p.x, y: p.y } : p);
+  const toSc = (p: Point2D) => toScreen(flip(p));
+
+  const headCenter = toSc({ x: 0.50, y: 0.16 });
+  const headRx = w * 0.088;
+  const headRy = headRx * 1.28;
+
+  // Head
+  ctx.beginPath();
+  ctx.ellipse(headCenter.x, headCenter.y, headRx, headRy, isMirrored ? -0.08 : 0.08, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // Shoulders leaning forward toward railing
+  const lSh = toSc({ x: 0.60, y: 0.29 });
+  const rSh = toSc({ x: 0.40, y: 0.28 });
+  const lHip = toSc({ x: 0.56, y: 0.57 });
+  const rHip = toSc({ x: 0.44, y: 0.57 });
+
+  // Torso
+  ctx.beginPath();
+  ctx.moveTo(rSh.x, rSh.y + 8);
+  ctx.lineTo(rHip.x, rHip.y);
+  ctx.lineTo(lHip.x, lHip.y);
+  ctx.lineTo(lSh.x, lSh.y + 8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Railing line indicator (subtle glowing guide)
+  const railL = toSc({ x: 0.18, y: 0.47 });
+  const railR = toSc({ x: 0.82, y: 0.47 });
+  ctx.beginPath();
+  ctx.moveTo(railL.x, railL.y);
+  ctx.lineTo(railR.x, railR.y);
+  ctx.stroke();
+
+  // Arms resting along railing
+  const lElb = toSc({ x: 0.68, y: 0.42 });
+  const lHand = toSc({ x: 0.72, y: 0.46 });
+  ctx.beginPath();
+  ctx.moveTo(lSh.x, lSh.y + 5);
+  ctx.lineTo(lElb.x + 8, lElb.y);
+  ctx.lineTo(lHand.x + 8, lHand.y);
+  ctx.arc(lHand.x, lHand.y, 7, 0, Math.PI * 2);
+  ctx.lineTo(lElb.x - 8, lElb.y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  const rElb = toSc({ x: 0.32, y: 0.42 });
+  const rHand = toSc({ x: 0.28, y: 0.46 });
+  ctx.beginPath();
+  ctx.moveTo(rSh.x, rSh.y + 5);
+  ctx.lineTo(rElb.x - 8, rElb.y);
+  ctx.lineTo(rHand.x - 8, rHand.y);
+  ctx.arc(rHand.x, rHand.y, 7, 0, Math.PI * 2);
+  ctx.lineTo(rElb.x + 8, rElb.y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Legs standing relaxed
+  const lKnee = toSc({ x: 0.55, y: 0.74 });
+  const rKnee = toSc({ x: 0.45, y: 0.74 });
+  const lFoot = toSc({ x: 0.54, y: 0.92 });
+  const rFoot = toSc({ x: 0.44, y: 0.92 });
+
+  ctx.beginPath();
+  ctx.moveTo(lHip.x, lHip.y);
+  ctx.lineTo(lKnee.x + 10, lKnee.y);
+  ctx.lineTo(lFoot.x + 10, lFoot.y);
+  ctx.lineTo(lFoot.x - 10, lFoot.y);
+  ctx.lineTo(lKnee.x - 10, lKnee.y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
   ctx.beginPath();
   ctx.moveTo(rHip.x, rHip.y);
   ctx.lineTo(rKnee.x - 10, rKnee.y);
-  ctx.lineTo(rAnkle.x - 10, rAnkle.y);
-  ctx.lineTo(rAnkle.x + 10, rAnkle.y);
+  ctx.lineTo(rFoot.x - 10, rFoot.y);
+  ctx.lineTo(rFoot.x + 10, rFoot.y);
   ctx.lineTo(rKnee.x + 10, rKnee.y);
+  ctx.closePath();
+  ctx.fill();
   ctx.stroke();
 }
 
