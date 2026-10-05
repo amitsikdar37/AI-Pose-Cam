@@ -189,9 +189,12 @@ export const App: React.FC = () => {
           setLiveLandmarks(detected);
 
           const isFrontCamera = sensorInfo?.facingMode === 'user';
+          const isLandscapeViewport = window.innerWidth > window.innerHeight;
+          const effectiveAngle = isLandscapeViewport ? 0 : orientationAngle;
+
           const effectiveTargetLandmarks = currentPose
-            ? (orientationAngle !== 0
-                ? getRotatedLandmarks(currentPose.landmarks, orientationAngle, isFrontCamera)
+            ? (effectiveAngle !== 0
+                ? getRotatedLandmarks(currentPose.landmarks, effectiveAngle, isFrontCamera)
                 : currentPose.landmarks)
             : null;
 

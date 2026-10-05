@@ -1,6 +1,5 @@
 import React, { useEffect, useRef } from 'react';
 import type { AlignmentResult, JointName, Point2D, PoseLandmarks, PosePreset, OrientationAngle } from '../types/camera';
-import { getRotatedLandmarks } from '../utils/orientationUtils';
 
 interface SkeletalOverlayProps {
   currentPose?: PosePreset | null;
@@ -115,10 +114,14 @@ export const SkeletalOverlay: React.FC<SkeletalOverlayProps> = ({
       return;
     }
 
-    // Adapt landmarks to device orientation (Portrait 0°, Landscape Left 90°, Landscape Right 270°)
-    const landmarks = orientationAngle !== 0
-      ? getRotatedLandmarks(rawLandmarks, orientationAngle, isMirrored)
-      : rawLandmarks;
+    // Check if the browser viewport itself is in landscape (e.g. phone screen auto-rotated)
+    const isLandscapeViewport = width > height;
+
+    // We only need canvas affine matrix rotation when the viewport is in portrait (width <= height)
+    // but the device is held sideways or the user explicitly switched to landscape mode (90° or 270°).
+    // If the browser viewport itself is ALREADY in landscape (width > height), the screen coordinate system
+    // has already been rotated by the OS/browser, so canvas rotation is not needed.
+    const shouldRotateCanvas = !isLandscapeViewport && (orientationAngle === 90 || orientationAngle === 270 || orientationAngle === 180);
 
     const isAligned = alignment.isAligned;
     const score = alignment.score;
@@ -155,39 +158,58 @@ export const SkeletalOverlay: React.FC<SkeletalOverlayProps> = ({
       };
     };
 
-    // Set dashed line style matching user's reference screenshots (Ulike/Posture Cam style)
-    ctx.setLineDash([7, 5]);
-    ctx.lineWidth = isAligned ? 3.5 : 2.8;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = silhouetteColor;
     ctx.shadowColor = glowColor;
     ctx.shadowBlur = isAligned ? 18 : 10;
 
-    // 1. Draw Silhouette Outline
-    // When rotated (Landscape), or for AI-generated / bespoke poses, render with the omnidirectional Anatomical Silhouette Engine
-    const poseId = currentPose?.id || '';
-    if (orientationAngle === 0 && poseId === 'downtown_steps') {
-      drawDowntownStepsSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
-    } else if (orientationAngle === 0 && poseId === 'selfie_hair') {
-      drawSelfieHairSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
-    } else if (orientationAngle === 0 && poseId === 'downtown_lean') {
-      drawDowntownLeanSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
-    } else if (orientationAngle === 0 && poseId === 'hands_hips') {
-      drawHandsHipsSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
-    } else if (orientationAngle === 0 && poseId === 'editorial_collar') {
-      drawEditorialCollarSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
-    } else if (orientationAngle === 0 && poseId === 'power_portrait') {
-      drawPowerPortraitSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
-    } else if (orientationAngle === 0 && poseId === 'golden_hour_candid') {
-      drawWalkingCandidSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
+    // Apply Isotropic Canvas Transformation for Landscape:
+    // Rotating via 2D affine matrix guarantees ZERO aspect ratio warping,
+    // ZERO normal distortion, and preserves 100% of the anatomical curves and proportions!
+    if (shouldRotateCanvas) {
+      const centerX = offsetX + renderW / 2;
+      const centerY = offsetY + renderH / 2;
+      ctx.translate(centerX, centerY);
+      ctx.rotate((orientationAngle * Math.PI) / 180);
+      const fitScale = Math.min(renderW / renderH, 1.0);
+      ctx.scale(fitScale, fitScale);
+      ctx.translate(-centerX, -centerY);
+
+      ctx.lineWidth = (isAligned ? 3.5 : 2.8) / fitScale;
+      ctx.setLineDash([7 / fitScale, 5 / fitScale]);
     } else {
-      // Dynamic AI Pose, Rotated Landscape Pose, or Bespoke Pose directly from landmarks
+      ctx.lineWidth = isAligned ? 3.5 : 2.8;
+      ctx.setLineDash([7, 5]);
+    }
+
+    // 1. Draw Silhouette Outline
+    // Uses baseDim = Math.min(renderW, renderH) so head, limbs and joints are proportioned
+    // beautifully regardless of portrait or landscape container aspect ratio.
+    const baseDim = Math.min(renderW, renderH);
+    const poseId = currentPose?.id || '';
+
+    if (poseId === 'downtown_steps') {
+      drawDowntownStepsSilhouette(ctx, toScreen, baseDim, renderH, isMirrored);
+    } else if (poseId === 'selfie_hair') {
+      drawSelfieHairSilhouette(ctx, toScreen, baseDim, renderH, isMirrored);
+    } else if (poseId === 'downtown_lean') {
+      drawDowntownLeanSilhouette(ctx, toScreen, baseDim, renderH, isMirrored);
+    } else if (poseId === 'hands_hips') {
+      drawHandsHipsSilhouette(ctx, toScreen, baseDim, renderH, isMirrored);
+    } else if (poseId === 'editorial_collar') {
+      drawEditorialCollarSilhouette(ctx, toScreen, baseDim, renderH, isMirrored);
+    } else if (poseId === 'power_portrait') {
+      drawPowerPortraitSilhouette(ctx, toScreen, baseDim, renderH, isMirrored);
+    } else if (poseId === 'golden_hour_candid') {
+      drawWalkingCandidSilhouette(ctx, toScreen, baseDim, renderH, isMirrored);
+    } else {
+      // Dynamic AI Pose or Bespoke Pose directly from landmarks
       drawAnatomicalHumanSilhouette(
         ctx,
-        landmarks,
+        rawLandmarks,
         toScreen,
-        renderW,
+        baseDim,
         renderH,
         isMirrored,
         isAligned,
@@ -198,7 +220,7 @@ export const SkeletalOverlay: React.FC<SkeletalOverlayProps> = ({
 
     // 2. Optional Hybrid / Skeletal Inner Markers
     if (guideMode === 'hybrid' || guideMode === 'skeletal') {
-      drawInnerSkeletalGuide(ctx, landmarks, toScreen, isAligned, silhouetteColor);
+      drawInnerSkeletalGuide(ctx, rawLandmarks, toScreen, isAligned, silhouetteColor);
     }
 
     // 3. Live User Detection Tracking Feedback (shown ONLY in hybrid or skeletal mode to avoid cluttering pure silhouette)
