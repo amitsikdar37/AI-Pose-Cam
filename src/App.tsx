@@ -28,7 +28,6 @@ import { getRotatedLandmarks } from './utils/orientationUtils';
 export const App: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
-  const initialAnalysisDoneRef = useRef(false);
 
   // Automatic Device Orientation Tracking (Portrait 0°, Landscape Left 90°, Landscape Right 270°)
   const { angle: orientationAngle, cycleOrientation } = useDeviceOrientation();
@@ -164,16 +163,6 @@ export const App: React.FC = () => {
       setIsAnalyzing(false);
     }
   }, [isAnalyzing]);
-
-  // Video loaded event handler: triggers initial frame analysis
-  const handleVideoPlaying = () => {
-    if (!initialAnalysisDoneRef.current) {
-      initialAnalysisDoneRef.current = true;
-      setTimeout(() => {
-        handlePerformAnalysis();
-      }, 1200);
-    }
-  };
 
   // 3. Pose Detection & Alignment Loop
   useEffect(() => {
@@ -618,7 +607,6 @@ export const App: React.FC = () => {
           playsInline
           autoPlay
           muted
-          onPlaying={handleVideoPlaying}
           className={`w-full h-full ${
             viewfinderMode === 'wide' ? 'object-contain' : 'object-cover'
           } transition-all duration-300 ${
