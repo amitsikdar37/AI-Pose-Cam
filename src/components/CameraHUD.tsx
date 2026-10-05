@@ -20,7 +20,7 @@ import {
   MicOff,
   MousePointerClick,
 } from 'lucide-react';
-import type { AlignmentResult, CameraSensorInfo, CapturedPhoto, PosePreset } from '../types/camera';
+import type { AlignmentResult, CameraSensorInfo, CapturedPhoto, PosePreset, OrientationAngle } from '../types/camera';
 import { PostureBar } from './PostureBar';
 
 interface CameraHUDProps {
@@ -61,6 +61,8 @@ interface CameraHUDProps {
   countdown?: number | null;
   countdownReason?: string | null;
   onCancelCountdown?: () => void;
+  orientationAngle?: OrientationAngle;
+  onCycleOrientation?: () => void;
 }
 
 
@@ -102,6 +104,8 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({
   countdown = null,
   countdownReason = null,
   onCancelCountdown,
+  orientationAngle = 0,
+  onCycleOrientation,
 }) => {
 
 
@@ -275,6 +279,22 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({
                 <Maximize2 className="w-3 h-3 text-gray-400" />
               )}
               <span className="capitalize">{viewfinderMode === 'wide' ? 'Wide' : 'Full'}</span>
+            </button>
+
+            {/* Device Orientation Indicator & Manual Rotation Toggle */}
+            <button
+              onClick={onCycleOrientation}
+              className={`px-2 py-1 rounded-full glass-pill text-[10px] font-semibold flex items-center gap-1 transition-all ${
+                orientationAngle !== 0
+                  ? 'text-emerald-300 border-emerald-400/50 bg-emerald-500/20'
+                  : 'text-gray-300 hover:text-white'
+              }`}
+              title="Device Orientation (Auto-detects on rotation or tap to change)"
+            >
+              <RotateCcw className={`w-3 h-3 transition-transform duration-300 ${
+                orientationAngle === 90 ? '-rotate-90' : orientationAngle === 270 ? 'rotate-90' : orientationAngle === 180 ? 'rotate-180' : ''
+              }`} />
+              <span>{orientationAngle === 0 ? 'Portrait' : orientationAngle === 90 ? 'Landscape L' : orientationAngle === 270 ? 'Landscape R' : '180°'}</span>
             </button>
 
             <button

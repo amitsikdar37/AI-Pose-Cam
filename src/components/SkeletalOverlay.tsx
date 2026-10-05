@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import type { AlignmentResult, JointName, Point2D, PoseLandmarks, PosePreset } from '../types/camera';
+import type { AlignmentResult, JointName, Point2D, PoseLandmarks, PosePreset, OrientationAngle } from '../types/camera';
+import { getRotatedLandmarks } from '../utils/orientationUtils';
 
 interface SkeletalOverlayProps {
   currentPose?: PosePreset | null;
@@ -11,6 +12,7 @@ interface SkeletalOverlayProps {
   guideMode?: 'silhouette' | 'hybrid' | 'skeletal';
   videoElement?: HTMLVideoElement | null;
   viewfinderFit?: 'wide' | 'cover';
+  orientationAngle?: OrientationAngle;
 }
 
 /**
@@ -82,6 +84,7 @@ export const SkeletalOverlay: React.FC<SkeletalOverlayProps> = ({
   guideMode = 'silhouette',
   videoElement,
   viewfinderFit = 'wide',
+  orientationAngle = 0,
 }) => {
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -106,11 +109,17 @@ export const SkeletalOverlay: React.FC<SkeletalOverlayProps> = ({
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, width, height);
 
-    const landmarks = currentPose?.landmarks || targetLandmarks;
-    if (!landmarks) {
+    const rawLandmarks = currentPose?.landmarks || targetLandmarks;
+    if (!rawLandmarks) {
       ctx.restore();
       return;
     }
+
+    // Adapt landmarks to device orientation (Portrait 0°, Landscape Left 90°, Landscape Right 270°)
+    const landmarks = orientationAngle !== 0
+      ? getRotatedLandmarks(rawLandmarks, orientationAngle, isMirrored)
+      : rawLandmarks;
+
     const isAligned = alignment.isAligned;
     const score = alignment.score;
 
@@ -134,7 +143,6 @@ export const SkeletalOverlay: React.FC<SkeletalOverlayProps> = ({
     // Calculate isotropic video bounding box to prevent ANY squeezing or zooming on mobile screens
     const { renderW, renderH, offsetX, offsetY } = getRenderedVideoBox(width, height, videoElement, viewfinderFit);
 
-
     // Isotropic coordinate conversion helper
     const toScreen = (pt: Point2D) => {
       let normX = pt.x;
@@ -157,25 +165,24 @@ export const SkeletalOverlay: React.FC<SkeletalOverlayProps> = ({
     ctx.shadowBlur = isAligned ? 18 : 10;
 
     // 1. Draw Silhouette Outline
-    // For curated catalog poses (selected explicitly from catalog), use their tailored drawing
-    // For ALL dynamic AI-generated poses and bespoke landmarks, draw the Anatomical Silhouette
+    // When rotated (Landscape), or for AI-generated / bespoke poses, render with the omnidirectional Anatomical Silhouette Engine
     const poseId = currentPose?.id || '';
-    if (poseId === 'downtown_steps') {
+    if (orientationAngle === 0 && poseId === 'downtown_steps') {
       drawDowntownStepsSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
-    } else if (poseId === 'selfie_hair') {
+    } else if (orientationAngle === 0 && poseId === 'selfie_hair') {
       drawSelfieHairSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
-    } else if (poseId === 'downtown_lean') {
+    } else if (orientationAngle === 0 && poseId === 'downtown_lean') {
       drawDowntownLeanSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
-    } else if (poseId === 'hands_hips') {
+    } else if (orientationAngle === 0 && poseId === 'hands_hips') {
       drawHandsHipsSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
-    } else if (poseId === 'editorial_collar') {
+    } else if (orientationAngle === 0 && poseId === 'editorial_collar') {
       drawEditorialCollarSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
-    } else if (poseId === 'power_portrait') {
+    } else if (orientationAngle === 0 && poseId === 'power_portrait') {
       drawPowerPortraitSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
-    } else if (poseId === 'golden_hour_candid') {
+    } else if (orientationAngle === 0 && poseId === 'golden_hour_candid') {
       drawWalkingCandidSilhouette(ctx, toScreen, renderW, renderH, isMirrored);
     } else {
-      // Dynamic AI Pose or Bespoke Pose directly from LLM landmarks
+      // Dynamic AI Pose, Rotated Landscape Pose, or Bespoke Pose directly from landmarks
       drawAnatomicalHumanSilhouette(
         ctx,
         landmarks,
@@ -200,7 +207,7 @@ export const SkeletalOverlay: React.FC<SkeletalOverlayProps> = ({
     }
 
     ctx.restore();
-  }, [currentPose, liveLandmarks, alignment, isMirrored, opacity, guideMode, videoElement]);
+  }, [currentPose, targetLandmarks, liveLandmarks, alignment, isMirrored, opacity, guideMode, videoElement, orientationAngle, viewfinderFit]);
 
   return (
     <canvas
@@ -724,49 +731,61 @@ function drawAnatomicalHumanSilhouette(
   ctx.shadowColor = glowColor;
   ctx.shadowBlur = isAligned ? 18 : 10;
 
-  // 1. Torso & Pelvis Contour
+  // 1. Omnidirectional Spine & Torso Geometry
   const midShoulder = { x: (pLSh.x + pRSh.x) / 2, y: (pLSh.y + pRSh.y) / 2 };
   const midHip = { x: (pLHip.x + pRHip.x) / 2, y: (pLHip.y + pRHip.y) / 2 };
-  const waistY = midShoulder.y * 0.52 + midHip.y * 0.48;
+  const spineDx = midShoulder.x - midHip.x;
+  const spineDy = midShoulder.y - midHip.y;
+  const spineLen = Math.hypot(spineDx, spineDy) || 1;
+  const uSpineX = spineDx / spineLen;
+  const uSpineY = spineDy / spineLen;
+  const uCrossX = -uSpineY;
+  const uCrossY = uSpineX;
 
-  // Natural human waist: 18% indent relative to shoulder-hip axis
-  const waistWidthRatio = 0.82;
-  const waistLX = midShoulder.x + (pLSh.x - midShoulder.x) * waistWidthRatio;
-  const waistRX = midShoulder.x + (pRSh.x - midShoulder.x) * waistWidthRatio;
+  // Waist sits along spine vector at 45% between hips and shoulders
+  const waistCenter = {
+    x: midHip.x + uSpineX * (spineLen * 0.45),
+    y: midHip.y + uSpineY * (spineLen * 0.45),
+  };
+  const waistHalfW = Math.max(14, shSpan * 0.38);
+  const waistR = { x: waistCenter.x + uCrossX * waistHalfW, y: waistCenter.y + uCrossY * waistHalfW };
+  const waistL = { x: waistCenter.x - uCrossX * waistHalfW, y: waistCenter.y - uCrossY * waistHalfW };
 
+  // Pelvis drops in opposite direction of spine (-uSpine)
   const pelvisDrop = Math.max(12, baseUnit * 0.32);
   const pelvisBottom = {
-    x: midHip.x,
-    y: Math.max(pLHip.y, pRHip.y) + pelvisDrop,
+    x: midHip.x - uSpineX * pelvisDrop,
+    y: midHip.y - uSpineY * pelvisDrop,
   };
 
   ctx.beginPath();
   ctx.moveTo(pRSh.x, pRSh.y);
-  ctx.quadraticCurveTo(waistRX, waistY, pRHip.x, pRHip.y);
+  ctx.quadraticCurveTo(waistR.x, waistR.y, pRHip.x, pRHip.y);
   ctx.quadraticCurveTo(pelvisBottom.x, pelvisBottom.y, pLHip.x, pLHip.y);
-  ctx.quadraticCurveTo(waistLX, waistY, pLSh.x, pLSh.y);
-  ctx.quadraticCurveTo(midShoulder.x, midShoulder.y + 4, pRSh.x, pRSh.y);
+  ctx.quadraticCurveTo(waistL.x, waistL.y, pLSh.x, pLSh.y);
+  ctx.quadraticCurveTo(midShoulder.x + uSpineX * 4, midShoulder.y + uSpineY * 4, pRSh.x, pRSh.y);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
 
-  // 2. Head & Neck
-  const headRx = baseUnit * 0.85;
-  const headRy = headRx * 1.28;
-  const headCenter = {
-    x: pNose.x,
-    y: pNose.y - headRy * 0.18,
+  // 2. Head & Neck aligned with spine vector
+  const headMajor = baseUnit * 1.15;
+  const headMinor = baseUnit * 0.88;
+  const headCenter = { x: pNose.x, y: pNose.y };
+  const headAngle = Math.atan2(uSpineY, uSpineX) + Math.PI / 2;
+
+  // Neck connecting jawline to shoulders
+  const jawCenter = {
+    x: headCenter.x - uSpineX * (headMajor * 0.45),
+    y: headCenter.y - uSpineY * (headMajor * 0.45),
   };
+  const neckHalfW = baseUnit * 0.35;
+  const shNeckHalfW = baseUnit * 0.52;
 
-  // Natural head tilt derived from shoulder slant
-  const shAngle = Math.atan2(pRSh.y - pLSh.y, pRSh.x - pLSh.x);
-  const headTilt = Math.max(-0.25, Math.min(0.25, shAngle * 0.5));
-
-  // Neck connecting jaw to shoulders
-  const neckTopL = { x: headCenter.x - headRx * 0.38, y: headCenter.y + headRy * 0.72 };
-  const neckTopR = { x: headCenter.x + headRx * 0.38, y: headCenter.y + headRy * 0.72 };
-  const neckBotL = { x: pLSh.x + (midShoulder.x - pLSh.x) * 0.55, y: midShoulder.y };
-  const neckBotR = { x: pRSh.x + (midShoulder.x - pRSh.x) * 0.55, y: midShoulder.y };
+  const neckTopL = { x: jawCenter.x - uCrossX * neckHalfW, y: jawCenter.y - uCrossY * neckHalfW };
+  const neckTopR = { x: jawCenter.x + uCrossX * neckHalfW, y: jawCenter.y + uCrossY * neckHalfW };
+  const neckBotL = { x: midShoulder.x - uCrossX * shNeckHalfW, y: midShoulder.y - uCrossY * shNeckHalfW };
+  const neckBotR = { x: midShoulder.x + uCrossX * shNeckHalfW, y: midShoulder.y + uCrossY * shNeckHalfW };
 
   ctx.beginPath();
   ctx.moveTo(neckTopL.x, neckTopL.y);
@@ -779,7 +798,7 @@ function drawAnatomicalHumanSilhouette(
 
   // Head Oval
   ctx.beginPath();
-  ctx.ellipse(headCenter.x, headCenter.y, headRx, headRy, headTilt, 0, Math.PI * 2);
+  ctx.ellipse(headCenter.x, headCenter.y, headMinor, headMajor, headAngle, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
 

@@ -22,11 +22,16 @@ import { PhotoPreviewModal } from './components/PhotoPreviewModal';
 import { PoseSelectorModal } from './components/PoseSelectorModal';
 import { SettingsModal } from './components/SettingsModal';
 import { PoseReferencePIP } from './components/PoseReferencePIP';
+import { useDeviceOrientation } from './hooks/useDeviceOrientation';
+import { getRotatedLandmarks } from './utils/orientationUtils';
 
 export const App: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const initialAnalysisDoneRef = useRef(false);
+
+  // Automatic Device Orientation Tracking (Portrait 0°, Landscape Left 90°, Landscape Right 270°)
+  const { angle: orientationAngle, cycleOrientation } = useDeviceOrientation();
 
   // Camera & Sensor State
   const [sensorInfo, setSensorInfo] = useState<CameraSensorInfo | null>(null);
@@ -183,9 +188,16 @@ export const App: React.FC = () => {
           const detected = poseDetectionService.detectPose(video, now);
           setLiveLandmarks(detected);
 
+          const isFrontCamera = sensorInfo?.facingMode === 'user';
+          const effectiveTargetLandmarks = currentPose
+            ? (orientationAngle !== 0
+                ? getRotatedLandmarks(currentPose.landmarks, orientationAngle, isFrontCamera)
+                : currentPose.landmarks)
+            : null;
+
           const alignResult = poseDetectionService.calculateAlignment(
             detected,
-            currentPose ? currentPose.landmarks : null,
+            effectiveTargetLandmarks,
             alignmentSensitivity
           );
 
@@ -213,7 +225,7 @@ export const App: React.FC = () => {
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [currentPose, alignmentSensitivity]);
+  }, [currentPose, alignmentSensitivity, orientationAngle, sensorInfo?.facingMode]);
 
   const [isCapturingState, setIsCapturingState] = useState(false);
   const isCapturingRef = useRef(false);
@@ -621,6 +633,7 @@ export const App: React.FC = () => {
           guideMode={guideMode}
           videoElement={videoRef.current}
           viewfinderFit={viewfinderMode}
+          orientationAngle={orientationAngle}
         />
 
 
@@ -764,6 +777,8 @@ export const App: React.FC = () => {
         countdown={countdown}
         countdownReason={countdownReason}
         onCancelCountdown={cancelCountdown}
+        orientationAngle={orientationAngle}
+        onCycleOrientation={cycleOrientation}
       />
 
 

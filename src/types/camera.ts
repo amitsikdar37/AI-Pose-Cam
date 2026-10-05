@@ -26,6 +26,8 @@ export type JointName =
 
 export type PoseLandmarks = Partial<Record<JointName, Point2D>>;
 
+export type OrientationAngle = 0 | 90 | 180 | 270;
+
 export type PoseArchetype =
   | 'railing_lean'
   | 'wall_lean'
