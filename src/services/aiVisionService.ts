@@ -239,40 +239,47 @@ export class AIVisionService {
 You are an expert portrait photographer and creative director.
 Look at this camera viewfinder snapshot.
 1. Scene & Person Analysis:
-   - Check if a person is visible in the frame, their distance, and framing: close-up selfie / upper-body portrait, seated, or full-body.
-   - Check the surrounding environment, lighting, and vibe.
+   - Identify the setting, objects (e.g. chair, couch, bench, steps, railing, wall), and lighting.
+   - Detect if there is a chair/couch/bench/steps to sit on, or a wall/railing to lean against.
 2. Pose Recommendation:
-   - Suggest the most natural, stylish, and flattering pose tailored specifically to this scene and subject.
-   - If the subject is taking a close-up selfie or upper-body photo, recommend an upper-body / selfie pose (e.g. relaxed shoulders, head tilt, hand touching hair or jawline, relaxed gaze).
+   - If the camera is pointing at a chair, couch, bench, or steps: recommend a seated pose ("framing": "seated") sitting comfortably on the chair/bench with hands on lap or chair arm!
+   - If in an open area: recommend a standing, walking, or leaning pose ("framing": "full_body").
+   - If close-up selfie: recommend an upper-body portrait pose ("framing": "upper_body").
    - Provide a catchy pose title ("poseTitle"), a clear actionable direction tip ("directionTip"), and vibe ("vibe").
-3. Anatomical Landmarks:
-   - Output normalized 2D coordinates (x: 0.0 left to 1.0 right, y: 0.0 top to 1.0 bottom) representing the recommended pose silhouette.
-   - For close-up / selfie / upper-body framing ("framing": "upper_body"):
-     * Head (nose): y between 0.18 and 0.26.
-     * Shoulders: y between 0.36 and 0.48, width ~0.26 to 0.38 apart.
-     * Elbows: y between 0.50 and 0.70.
-     * Wrists: if touching hair/chin/jaw, place near head/neck; if relaxed, near y 0.70 to 0.85.
-     * Hips/knees: omitted or placed at bottom of frame (y >= 0.85).
-   - For full-body framing ("framing": "full_body"):
-     * Head near 0.16, shoulders near 0.28, hips near 0.56, knees near 0.74, ankles near 0.91.
+3. Complete 13 Anatomical Landmarks:
+   - You MUST output all 13 coordinates (x: 0.0 left to 1.0 right, y: 0.0 top to 1.0 bottom) representing the recommended human pose silhouette.
+   - For a SEATED POSE ("framing": "seated"):
+     * Head (nose): y between 0.18 and 0.25
+     * Shoulders: y between 0.32 and 0.40, width ~0.24 to 0.32
+     * Elbows: y between 0.46 and 0.54
+     * Wrists (resting on lap or chair arm): y between 0.58 and 0.65
+     * Hips (seated on chair seat): y between 0.60 and 0.68
+     * Knees (bent forward at front edge of seat, forming lap): y between 0.70 and 0.78
+     * Ankles (feet resting on floor): y between 0.88 and 0.94
+   - For a STANDING POSE ("framing": "full_body"):
+     * Head near 0.16, shoulders near 0.28, hips near 0.56, knees near 0.74, ankles near 0.92.
 
 Return ONLY a raw JSON object with this exact structure:
 {
-  "framing": "upper_body",
-  "poseTitle": "The Effortless Portrait",
-  "directionTip": "Drop your shoulders, angle your chin slightly toward the light, and look calmly into the lens.",
-  "sceneDescription": "Indoor portrait setting with soft lighting",
-  "vibe": "Chic & Natural",
+  "framing": "seated",
+  "poseTitle": "The Casual Chair Sit",
+  "directionTip": "Sit comfortably on the chair, rest your hands gently on your lap, and look relaxed toward the lens.",
+  "sceneDescription": "Indoor scene with chair",
+  "vibe": "Effortless & Relaxed",
   "landmarks": {
     "nose": {"x": 0.50, "y": 0.22},
-    "left_shoulder": {"x": 0.36, "y": 0.42},
-    "right_shoulder": {"x": 0.64, "y": 0.42},
-    "left_elbow": {"x": 0.30, "y": 0.60},
-    "right_elbow": {"x": 0.70, "y": 0.60},
-    "left_wrist": {"x": 0.34, "y": 0.78},
-    "right_wrist": {"x": 0.66, "y": 0.78},
-    "left_hip": {"x": 0.40, "y": 0.80},
-    "right_hip": {"x": 0.60, "y": 0.80}
+    "left_shoulder": {"x": 0.38, "y": 0.36},
+    "right_shoulder": {"x": 0.62, "y": 0.36},
+    "left_elbow": {"x": 0.32, "y": 0.50},
+    "right_elbow": {"x": 0.68, "y": 0.50},
+    "left_wrist": {"x": 0.40, "y": 0.62},
+    "right_wrist": {"x": 0.60, "y": 0.62},
+    "left_hip": {"x": 0.42, "y": 0.64},
+    "right_hip": {"x": 0.58, "y": 0.64},
+    "left_knee": {"x": 0.40, "y": 0.76},
+    "right_knee": {"x": 0.60, "y": 0.76},
+    "left_ankle": {"x": 0.42, "y": 0.92},
+    "right_ankle": {"x": 0.58, "y": 0.92}
   }
 }
 `;
@@ -527,10 +534,9 @@ Return ONLY a raw JSON object with this exact structure:
    * 2. Shoulders must always be higher than hips
    * 3. Hips must always be higher than knees
    * 4. Knees must always be higher than ankles
-   * If any joint is inverted or corrupted (as in Image 2), it automatically repairs it
-   * to maintain anatomical integrity!
+   * If the pose is seated, ensures lap and bent knees are correctly shaped!
    */
-  public sanitizeAndValidateLandmarks(raw?: PoseLandmarks): PoseLandmarks {
+  public sanitizeAndValidateLandmarks(raw?: PoseLandmarks, isSeated = false): PoseLandmarks {
     const defaultStanding: PoseLandmarks = {
       nose: { x: 0.50, y: 0.18 },
       left_shoulder: { x: 0.41, y: 0.30 },
@@ -569,7 +575,62 @@ Return ONLY a raw JSON object with this exact structure:
       }
     }
 
-    // Biomechanical gravity checks (ensure natural upright ordering)
+    // Seated chair pose synthesis
+    if (isSeated) {
+      const midShX = (valid.left_shoulder!.x + valid.right_shoulder!.x) / 2;
+      const shWidth = Math.max(0.16, Math.abs(valid.right_shoulder!.x - valid.left_shoulder!.x));
+      const hipWidth = shWidth * 0.85;
+
+      const hipY = Math.max(0.52, Math.min(0.68, ((valid.left_hip?.y ?? 0.62) + (valid.right_hip?.y ?? 0.62)) / 2));
+      const hipCenterX = (valid.left_hip && valid.right_hip)
+        ? (valid.left_hip.x + valid.right_hip.x) / 2
+        : midShX;
+
+      valid.left_hip = {
+        x: Math.max(0.08, hipCenterX - hipWidth / 2),
+        y: hipY
+      };
+      valid.right_hip = {
+        x: Math.min(0.92, hipCenterX + hipWidth / 2),
+        y: hipY
+      };
+
+      // Lap & knees extending forward / slightly outward
+      valid.left_knee = {
+        x: valid.left_knee && valid.left_knee.y > hipY ? valid.left_knee.x : valid.left_hip.x - 0.02,
+        y: valid.left_knee && valid.left_knee.y > hipY ? Math.min(0.80, valid.left_knee.y) : Math.min(0.80, hipY + 0.13),
+      };
+      valid.right_knee = {
+        x: valid.right_knee && valid.right_knee.y > hipY ? valid.right_knee.x : valid.right_hip.x + 0.02,
+        y: valid.right_knee && valid.right_knee.y > hipY ? Math.min(0.80, valid.right_knee.y) : Math.min(0.80, hipY + 0.13),
+      };
+
+      // Calves & feet to floor
+      valid.left_ankle = {
+        x: valid.left_ankle && valid.left_ankle.y > valid.left_knee.y ? valid.left_ankle.x : valid.left_knee.x,
+        y: Math.max(0.86, valid.left_ankle?.y ?? 0.92),
+      };
+      valid.right_ankle = {
+        x: valid.right_ankle && valid.right_ankle.y > valid.right_knee.y ? valid.right_ankle.x : valid.right_knee.x,
+        y: Math.max(0.86, valid.right_ankle?.y ?? 0.92),
+      };
+
+      // Hands resting on lap / chair arm
+      if (!valid.left_wrist || valid.left_wrist.y > 0.82) {
+        valid.left_wrist = { x: valid.left_hip.x + 0.02, y: hipY + 0.02 };
+      }
+      if (!valid.right_wrist || valid.right_wrist.y > 0.82) {
+        valid.right_wrist = { x: valid.right_hip.x - 0.02, y: hipY + 0.02 };
+      }
+      if (!valid.left_elbow) {
+        valid.left_elbow = { x: valid.left_shoulder!.x - 0.05, y: (valid.left_shoulder!.y + hipY) / 2 };
+      }
+      if (!valid.right_elbow) {
+        valid.right_elbow = { x: valid.right_shoulder!.x + 0.05, y: (valid.right_shoulder!.y + hipY) / 2 };
+      }
+    }
+
+    // Biomechanical gravity checks
     const avgShY = (valid.left_shoulder!.y + valid.right_shoulder!.y) / 2;
     if (valid.nose!.y >= avgShY) {
       valid.nose!.y = Math.max(0.12, avgShY - 0.12);
@@ -592,7 +653,13 @@ Return ONLY a raw JSON object with this exact structure:
   }
 
   private formatResponseAsPosePreset(data: SceneAnalysisResponse, modelUsed: string): PosePreset {
-    const sanitizedLandmarks = this.sanitizeAndValidateLandmarks(data.landmarks as PoseLandmarks);
+    const isSeated =
+      data.framing === 'seated' ||
+      /sit|chair|bench|lap|steps|stool|sofa|couch/i.test(
+        `${data.poseTitle || ''} ${data.directionTip || ''} ${data.sceneDescription || ''}`
+      );
+
+    const sanitizedLandmarks = this.sanitizeAndValidateLandmarks(data.landmarks as PoseLandmarks, isSeated);
     const shortModelName = modelUsed.replace('gemini-', '').toUpperCase();
 
     return {
@@ -600,7 +667,7 @@ Return ONLY a raw JSON object with this exact structure:
       title: data.poseTitle || 'Bespoke AI Pose',
       vibe: data.vibe || 'AI Scene Director',
       category: 'Editorial',
-      framing: data.framing || 'full_body',
+      framing: isSeated ? 'seated' : data.framing || 'full_body',
       directionTip: data.directionTip || 'Follow the glowing silhouette guide.',
       reasoning: data.sceneDescription ? `${data.sceneDescription} [${shortModelName}]` : `Bespoke pose direct from ${shortModelName}`,
       landmarks: sanitizedLandmarks,
