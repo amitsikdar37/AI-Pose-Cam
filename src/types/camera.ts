@@ -26,6 +26,18 @@ export type JointName =
 
 export type PoseLandmarks = Partial<Record<JointName, Point2D>>;
 
+export type PoseArchetype =
+  | 'railing_lean'
+  | 'wall_lean'
+  | 'seated_steps'
+  | 'seated_lean'
+  | 'selfie_hair'
+  | 'hands_hips'
+  | 'editorial_collar'
+  | 'power_portrait'
+  | 'walking_candid'
+  | 'general';
+
 export interface PosePreset {
   id: string;
   title: string;
@@ -37,6 +49,8 @@ export interface PosePreset {
   landmarks: PoseLandmarks;
   referenceImage?: string;
   silhouetteSvgPaths?: string[];
+  archetype?: PoseArchetype;
+  leanSide?: 'left' | 'right';
 }
 
 export interface SceneAnalysisResponse {
@@ -47,6 +61,8 @@ export interface SceneAnalysisResponse {
   framing: 'full_body' | 'upper_body' | 'seated';
   landmarks: PoseLandmarks;
   confidence?: number;
+  archetype?: PoseArchetype;
+  leanSide?: 'left' | 'right';
 }
 
 export interface AlignmentResult {
