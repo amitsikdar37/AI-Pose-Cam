@@ -161,7 +161,8 @@ export class PoseDetectionService {
   public calculateAlignment(
     liveLandmarks: PoseLandmarks | null,
     targetLandmarks: PoseLandmarks | null,
-    alignmentThreshold = 75
+    alignmentThreshold = 75,
+    isMirrored = false
   ): AlignmentResult {
     if (!liveLandmarks || !targetLandmarks) {
       return {
@@ -174,23 +175,45 @@ export class PoseDetectionService {
       };
     }
 
-    // 1. Compute torso centers and scales to normalize for distance and horizontal position
-    const liveShoulderMid = this.getMidpoint(liveLandmarks.left_shoulder, liveLandmarks.right_shoulder);
-    const liveHipMid = this.getMidpoint(liveLandmarks.left_hip, liveLandmarks.right_hip);
-    const targetShoulderMid = this.getMidpoint(targetLandmarks.left_shoulder, targetLandmarks.right_shoulder);
-    const targetHipMid = this.getMidpoint(targetLandmarks.left_hip, targetLandmarks.right_hip);
+    const isVisible = (pt?: Point2D) => {
+      if (!pt) return false;
+      if (typeof pt.visibility === 'number' && pt.visibility < 0.40) return false;
+      return true;
+    };
 
-    const liveCenter = liveShoulderMid && liveHipMid ? this.getMidpoint(liveShoulderMid, liveHipMid) : liveShoulderMid;
-    const targetCenter = targetShoulderMid && targetHipMid ? this.getMidpoint(targetShoulderMid, targetHipMid) : targetShoulderMid;
+    // 1. Unified Anatomical Reference Point & Scale:
+    // Shoulder midpoint & shoulder span are present in 100% of human camera framings (selfie, portrait, full body).
+    // Using shoulderMid guarantees live and target coordinate spaces have the EXACT SAME origin!
+    const liveShoulderMid = this.getMidpoint(liveLandmarks.left_shoulder, liveLandmarks.right_shoulder) || liveLandmarks.nose;
+    const targetShoulderMid = this.getMidpoint(targetLandmarks.left_shoulder, targetLandmarks.right_shoulder) || targetLandmarks.nose;
 
-    const liveScale =
-      liveShoulderMid && liveHipMid
-        ? Math.hypot(liveShoulderMid.x - liveHipMid.x, liveShoulderMid.y - liveHipMid.y)
-        : 0.35;
-    const targetScale =
-      targetShoulderMid && targetHipMid
-        ? Math.hypot(targetShoulderMid.x - targetHipMid.x, targetShoulderMid.y - targetHipMid.y)
-        : 0.35;
+    if (!liveShoulderMid || !targetShoulderMid) {
+      return {
+        score: 0,
+        isAligned: false,
+        jointErrors: {},
+        primaryFeedback: 'Position your face & shoulders in frame',
+        alignedJointsCount: 0,
+        totalJointsCount: 0,
+      };
+    }
+
+    const liveShSpan = liveLandmarks.left_shoulder && liveLandmarks.right_shoulder
+      ? Math.hypot(liveLandmarks.left_shoulder.x - liveLandmarks.right_shoulder.x, liveLandmarks.left_shoulder.y - liveLandmarks.right_shoulder.y)
+      : 0.25;
+    const targetShSpan = targetLandmarks.left_shoulder && targetLandmarks.right_shoulder
+      ? Math.hypot(targetLandmarks.left_shoulder.x - targetLandmarks.right_shoulder.x, targetLandmarks.left_shoulder.y - targetLandmarks.right_shoulder.y)
+      : 0.25;
+
+    const liveScale = Math.max(0.12, liveShSpan);
+    const targetScale = Math.max(0.12, targetShSpan);
+
+    // 2. Framing Intelligence (Selfie / Close-Up vs Full Body):
+    // In selfies, hips and knees are out of frame, and hands may be holding the phone.
+    // We only score joints that are visible and relevant to the framing!
+    const hasLiveHips = isVisible(liveLandmarks.left_hip) || isVisible(liveLandmarks.right_hip);
+    const hasLiveKnees = isVisible(liveLandmarks.left_knee) || isVisible(liveLandmarks.right_knee);
+    const isSelfieOrUpperBody = !hasLiveHips && !hasLiveKnees;
 
     const keyJoints: JointName[] = [
       'nose',
@@ -209,6 +232,7 @@ export class PoseDetectionService {
     let totalWeight = 0;
     let accumulatedNormalizedError = 0;
     let alignedJoints = 0;
+    let scoredJointsCount = 0;
     let maxErrorJoint: JointName | null = null;
     let maxErrorVal = 0;
     const jointErrors: Partial<Record<JointName, number>> = {};
@@ -218,67 +242,53 @@ export class PoseDetectionService {
       const targetPt = targetLandmarks[joint];
       if (!livePt || !targetPt) continue;
 
-      // Transform into relative torso space (invariant to screen position and distance)
-      let relDist: number;
-      if (liveCenter && targetCenter && liveScale > 0.05 && targetScale > 0.05) {
-        const liveRelX = (livePt.x - liveCenter.x) / liveScale;
-        const liveRelY = (livePt.y - liveCenter.y) / liveScale;
-        const targetRelX = (targetPt.x - targetCenter.x) / targetScale;
-        const targetRelY = (targetPt.y - targetCenter.y) / targetScale;
-        relDist = Math.hypot(liveRelX - targetRelX, liveRelY - targetRelY);
-      } else {
-        relDist = Math.hypot(livePt.x - targetPt.x, livePt.y - targetPt.y);
+      // In a selfie or close-up, skip joints that are not visible in the camera frame
+      const visible = isVisible(livePt);
+      if (isSelfieOrUpperBody && !visible) {
+        continue;
       }
+      // In full body, also skip completely invisible joints (occluded legs/hands)
+      if (!visible && (joint.includes('knee') || joint.includes('ankle') || joint.includes('wrist'))) {
+        continue;
+      }
+
+      scoredJointsCount++;
+
+      // Relative torso/shoulder coordinate comparison
+      const liveRelX = (livePt.x - liveShoulderMid.x) / liveScale;
+      const liveRelY = (livePt.y - liveShoulderMid.y) / liveScale;
+      const targetRelX = (targetPt.x - targetShoulderMid.x) / targetScale;
+      const targetRelY = (targetPt.y - targetShoulderMid.y) / targetScale;
+      const relDist = Math.hypot(liveRelX - targetRelX, liveRelY - targetRelY);
 
       jointErrors[joint] = relDist;
 
-      // Wrists and elbows define expressive silhouette gestures
-      const weight = joint.includes('wrist') ? 1.5 : joint.includes('elbow') ? 1.3 : 1.0;
+      // Assign weight: nose and shoulders are the primary visual anchor in all framings
+      let weight = 1.0;
+      if (joint === 'nose') {
+        weight = isSelfieOrUpperBody ? 2.5 : 1.8;
+      } else if (joint.includes('shoulder')) {
+        weight = isSelfieOrUpperBody ? 2.0 : 1.5;
+      } else if (joint.includes('wrist')) {
+        weight = 1.2;
+      } else if (joint.includes('elbow')) {
+        weight = 1.0;
+      }
+
       accumulatedNormalizedError += relDist * weight;
       totalWeight += weight;
 
-      if (relDist < 0.28) {
+      if (relDist < 0.35) {
         alignedJoints++;
       }
 
-      if (relDist > maxErrorVal) {
+      if (relDist > maxErrorVal && visible) {
         maxErrorVal = relDist;
         maxErrorJoint = joint;
       }
     }
 
-    // 2. Compare limb angles (pure posture geometry, completely scale-free)
-    const angleScores: number[] = [];
-
-    // Left arm angle (shoulder-elbow-wrist)
-    const liveLeftElbow = this.calculateAngle(liveLandmarks.left_shoulder, liveLandmarks.left_elbow, liveLandmarks.left_wrist);
-    const targetLeftElbow = this.calculateAngle(targetLandmarks.left_shoulder, targetLandmarks.left_elbow, targetLandmarks.left_wrist);
-    if (liveLeftElbow !== null && targetLeftElbow !== null) {
-      angleScores.push(this.angleSimilarity(liveLeftElbow, targetLeftElbow));
-    }
-
-    // Right arm angle (shoulder-elbow-wrist)
-    const liveRightElbow = this.calculateAngle(liveLandmarks.right_shoulder, liveLandmarks.right_elbow, liveLandmarks.right_wrist);
-    const targetRightElbow = this.calculateAngle(targetLandmarks.right_shoulder, targetLandmarks.right_elbow, targetLandmarks.right_wrist);
-    if (liveRightElbow !== null && targetRightElbow !== null) {
-      angleScores.push(this.angleSimilarity(liveRightElbow, targetRightElbow));
-    }
-
-    // Left shoulder elevation (hip-shoulder-elbow)
-    const liveLeftSh = this.calculateAngle(liveLandmarks.left_hip, liveLandmarks.left_shoulder, liveLandmarks.left_elbow);
-    const targetLeftSh = this.calculateAngle(targetLandmarks.left_hip, targetLandmarks.left_shoulder, targetLandmarks.left_elbow);
-    if (liveLeftSh !== null && targetLeftSh !== null) {
-      angleScores.push(this.angleSimilarity(liveLeftSh, targetLeftSh));
-    }
-
-    // Right shoulder elevation (hip-shoulder-elbow)
-    const liveRightSh = this.calculateAngle(liveLandmarks.right_hip, liveLandmarks.right_shoulder, liveLandmarks.right_elbow);
-    const targetRightSh = this.calculateAngle(targetLandmarks.right_hip, targetLandmarks.right_shoulder, targetLandmarks.right_elbow);
-    if (liveRightSh !== null && targetRightSh !== null) {
-      angleScores.push(this.angleSimilarity(liveRightSh, targetRightSh));
-    }
-
-    if (totalWeight === 0) {
+    if (totalWeight === 0 || scoredJointsCount === 0) {
       return {
         score: 0,
         isAligned: false,
@@ -290,19 +300,50 @@ export class PoseDetectionService {
     }
 
     const avgRelError = accumulatedNormalizedError / totalWeight;
-    const positionScore = Math.max(0, Math.min(100, 100 - avgRelError * 85));
+    // Map error to a responsive score: 0 error = 100%, 0.4 error = 72%, 0.8 error = 44%
+    const positionScore = Math.max(0, Math.min(100, 100 - avgRelError * 70));
+
+    // 3. Posture Geometry Angles (Limb & Shoulder Slopes)
+    const angleScores: number[] = [];
+
+    // Shoulder tilt / posture level (always checked if shoulders present)
+    if (liveLandmarks.left_shoulder && liveLandmarks.right_shoulder && targetLandmarks.left_shoulder && targetLandmarks.right_shoulder) {
+      const liveShAngle = Math.atan2(liveLandmarks.left_shoulder.y - liveLandmarks.right_shoulder.y, liveLandmarks.left_shoulder.x - liveLandmarks.right_shoulder.x) * (180 / Math.PI);
+      const targetShAngle = Math.atan2(targetLandmarks.left_shoulder.y - targetLandmarks.right_shoulder.y, targetLandmarks.left_shoulder.x - targetLandmarks.right_shoulder.x) * (180 / Math.PI);
+      const shDiff = Math.abs(liveShAngle - targetShAngle);
+      angleScores.push(Math.max(0, 100 - shDiff * 3));
+    }
+
+    // Arm angles (only if elbow and wrist are visible)
+    if (isVisible(liveLandmarks.left_elbow) && isVisible(liveLandmarks.left_wrist)) {
+      const liveLeftElbow = this.calculateAngle(liveLandmarks.left_shoulder, liveLandmarks.left_elbow, liveLandmarks.left_wrist);
+      const targetLeftElbow = this.calculateAngle(targetLandmarks.left_shoulder, targetLandmarks.left_elbow, targetLandmarks.left_wrist);
+      if (liveLeftElbow !== null && targetLeftElbow !== null) {
+        angleScores.push(this.angleSimilarity(liveLeftElbow, targetLeftElbow));
+      }
+    }
+
+    if (isVisible(liveLandmarks.right_elbow) && isVisible(liveLandmarks.right_wrist)) {
+      const liveRightElbow = this.calculateAngle(liveLandmarks.right_shoulder, liveLandmarks.right_elbow, liveLandmarks.right_wrist);
+      const targetRightElbow = this.calculateAngle(targetLandmarks.right_shoulder, targetLandmarks.right_elbow, targetLandmarks.right_wrist);
+      if (liveRightElbow !== null && targetRightElbow !== null) {
+        angleScores.push(this.angleSimilarity(liveRightElbow, targetRightElbow));
+      }
+    }
 
     const avgAngleScore =
       angleScores.length > 0
         ? angleScores.reduce((a, b) => a + b, 0) / angleScores.length
         : positionScore;
 
-    // Combined score: 60% angle geometry + 40% normalized relative position
-    let finalScore = Math.round(avgAngleScore * 0.6 + positionScore * 0.4);
+    let finalScore = Math.round(positionScore * 0.60 + avgAngleScore * 0.40);
 
-    // Bonus for matching key limbs
-    if (alignedJoints >= 5) {
-      finalScore = Math.min(100, finalScore + 6);
+    // Alignment reward bonus if head and shoulders match well
+    const noseErr = jointErrors['nose'] ?? 1.0;
+    const lShErr = jointErrors['left_shoulder'] ?? 1.0;
+    const rShErr = jointErrors['right_shoulder'] ?? 1.0;
+    if (noseErr < 0.25 && lShErr < 0.30 && rShErr < 0.30) {
+      finalScore = Math.min(100, finalScore + 8);
     }
 
     const isAligned = finalScore >= alignmentThreshold;
@@ -312,11 +353,12 @@ export class PoseDetectionService {
       primaryFeedback = 'PERFECT! Hold steady & snap photo!';
     } else if (finalScore >= 65) {
       primaryFeedback = 'Almost there! Hold steady inside the silhouette';
-    } else if (maxErrorJoint && maxErrorVal > 0.32) {
+    } else if (maxErrorJoint && maxErrorVal > 0.28) {
       primaryFeedback = this.getJointDirectionCue(
         maxErrorJoint,
         liveLandmarks[maxErrorJoint]!,
-        targetLandmarks[maxErrorJoint]!
+        targetLandmarks[maxErrorJoint]!,
+        isMirrored
       );
     }
 
@@ -326,7 +368,7 @@ export class PoseDetectionService {
       jointErrors,
       primaryFeedback,
       alignedJointsCount: alignedJoints,
-      totalJointsCount: keyJoints.length,
+      totalJointsCount: scoredJointsCount,
     };
   }
 
@@ -349,9 +391,13 @@ export class PoseDetectionService {
     return Math.max(0, Math.min(100, 100 - (diff / 60) * 100));
   }
 
-  private getJointDirectionCue(joint: JointName, livePt: Point2D, targetPt: Point2D): string {
-    const dx = targetPt.x - livePt.x;
+  private getJointDirectionCue(joint: JointName, livePt: Point2D, targetPt: Point2D, isMirrored = false): string {
+    let dx = targetPt.x - livePt.x;
     const dy = targetPt.y - livePt.y;
+
+    if (isMirrored) {
+      dx = -dx;
+    }
 
     const jointLabel = joint
       .replace('left_', 'Left ')

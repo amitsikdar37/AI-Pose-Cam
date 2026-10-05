@@ -190,7 +190,8 @@ export const App: React.FC = () => {
           const alignResult = poseDetectionService.calculateAlignment(
             detected,
             effectiveTargetLandmarks,
-            alignmentSensitivity
+            alignmentSensitivity,
+            isFrontCamera
           );
 
           setAlignment(alignResult);

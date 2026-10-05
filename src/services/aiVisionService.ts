@@ -239,44 +239,40 @@ export class AIVisionService {
 You are an expert portrait photographer and creative director.
 Look at this camera viewfinder snapshot.
 1. Scene & Person Analysis:
-   - Check if a person is visible in the frame, their current posture, distance, and framing (close-up/selfie, waist-up portrait, seated, full-body).
-   - Check the surrounding environment, lighting, furniture, props, and setting.
+   - Check if a person is visible in the frame, their distance, and framing: close-up selfie / upper-body portrait, seated, or full-body.
+   - Check the surrounding environment, lighting, and vibe.
 2. Pose Recommendation:
    - Suggest the most natural, stylish, and flattering pose tailored specifically to this scene and subject.
-   - Provide a catchy pose title ("poseTitle"), a clear, actionable direction tip ("directionTip"), and vibe ("vibe").
+   - If the subject is taking a close-up selfie or upper-body photo, recommend an upper-body / selfie pose (e.g. relaxed shoulders, head tilt, hand touching hair or jawline, relaxed gaze).
+   - Provide a catchy pose title ("poseTitle"), a clear actionable direction tip ("directionTip"), and vibe ("vibe").
 3. Anatomical Landmarks:
-   - Output 13 normalized 2D coordinates (x: 0.0 left to 1.0 right, y: 0.0 top to 1.0 bottom) representing the recommended pose silhouette.
-   - Natural human proportion guidelines:
-     * Head (nose): near upper area (y between 0.12 and 0.28).
-     * Shoulders: y between 0.24 and 0.40, realistic width (~0.16 to 0.28 apart).
-     * Elbows: y between 0.36 and 0.58.
-     * Wrists: natural placement according to the pose (e.g. resting casually, in pocket, on hip, touching hair, or relaxed).
-     * Hips: y between 0.50 and 0.68.
-     * Knees: y between 0.65 and 0.82 (or bent if seated).
-     * Ankles: y between 0.80 and 0.95.
-     * Biomechanical integrity: Head must be above shoulders, shoulders above hips, hips above knees/ankles.
+   - Output normalized 2D coordinates (x: 0.0 left to 1.0 right, y: 0.0 top to 1.0 bottom) representing the recommended pose silhouette.
+   - For close-up / selfie / upper-body framing ("framing": "upper_body"):
+     * Head (nose): y between 0.18 and 0.26.
+     * Shoulders: y between 0.36 and 0.48, width ~0.26 to 0.38 apart.
+     * Elbows: y between 0.50 and 0.70.
+     * Wrists: if touching hair/chin/jaw, place near head/neck; if relaxed, near y 0.70 to 0.85.
+     * Hips/knees: omitted or placed at bottom of frame (y >= 0.85).
+   - For full-body framing ("framing": "full_body"):
+     * Head near 0.16, shoulders near 0.28, hips near 0.56, knees near 0.74, ankles near 0.91.
 
 Return ONLY a raw JSON object with this exact structure:
 {
-  "framing": "full_body",
-  "poseTitle": "The Relaxed Room Pose",
-  "directionTip": "Relax your shoulders, shift your weight slightly to one side, and let your hands rest naturally.",
-  "sceneDescription": "Indoor setting with soft lighting",
-  "vibe": "Effortless & Candid",
+  "framing": "upper_body",
+  "poseTitle": "The Effortless Portrait",
+  "directionTip": "Drop your shoulders, angle your chin slightly toward the light, and look calmly into the lens.",
+  "sceneDescription": "Indoor portrait setting with soft lighting",
+  "vibe": "Chic & Natural",
   "landmarks": {
-    "nose": {"x": 0.50, "y": 0.18},
-    "left_shoulder": {"x": 0.40, "y": 0.30},
-    "right_shoulder": {"x": 0.60, "y": 0.30},
-    "left_elbow": {"x": 0.35, "y": 0.44},
-    "right_elbow": {"x": 0.65, "y": 0.44},
-    "left_wrist": {"x": 0.38, "y": 0.58},
-    "right_wrist": {"x": 0.62, "y": 0.58},
-    "left_hip": {"x": 0.44, "y": 0.58},
-    "right_hip": {"x": 0.56, "y": 0.58},
-    "left_knee": {"x": 0.45, "y": 0.74},
-    "right_knee": {"x": 0.55, "y": 0.74},
-    "left_ankle": {"x": 0.46, "y": 0.91},
-    "right_ankle": {"x": 0.54, "y": 0.91}
+    "nose": {"x": 0.50, "y": 0.22},
+    "left_shoulder": {"x": 0.36, "y": 0.42},
+    "right_shoulder": {"x": 0.64, "y": 0.42},
+    "left_elbow": {"x": 0.30, "y": 0.60},
+    "right_elbow": {"x": 0.70, "y": 0.60},
+    "left_wrist": {"x": 0.34, "y": 0.78},
+    "right_wrist": {"x": 0.66, "y": 0.78},
+    "left_hip": {"x": 0.40, "y": 0.80},
+    "right_hip": {"x": 0.60, "y": 0.80}
   }
 }
 `;

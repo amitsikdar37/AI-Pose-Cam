@@ -717,30 +717,36 @@ function drawAnatomicalHumanSilhouette(
   rawLandmarks: PoseLandmarks,
   toScreen: (pt: Point2D) => { x: number; y: number },
   w: number,
-  _h: number,
+  h: number,
   _isMirrored: boolean,
   isAligned: boolean,
   silhouetteColor: string,
   glowColor: string
 ) {
   const landmarks: PoseLandmarks = { ...rawLandmarks };
-  const pNose = toScreen(landmarks.nose || { x: 0.50, y: 0.18 });
-  const pLSh = toScreen(landmarks.left_shoulder || { x: 0.40, y: 0.30 });
-  const pRSh = toScreen(landmarks.right_shoulder || { x: 0.60, y: 0.30 });
-  const pLElb = toScreen(landmarks.left_elbow || { x: 0.35, y: 0.44 });
-  const pRElb = toScreen(landmarks.right_elbow || { x: 0.65, y: 0.44 });
-  const pLWr = toScreen(landmarks.left_wrist || { x: 0.38, y: 0.58 });
-  const pRWr = toScreen(landmarks.right_wrist || { x: 0.62, y: 0.58 });
-  const pLHip = toScreen(landmarks.left_hip || { x: 0.44, y: 0.58 });
-  const pRHip = toScreen(landmarks.right_hip || { x: 0.56, y: 0.58 });
-  const pLKnee = toScreen(landmarks.left_knee || { x: 0.45, y: 0.74 });
-  const pRKnee = toScreen(landmarks.right_knee || { x: 0.55, y: 0.74 });
-  const pLAnk = toScreen(landmarks.left_ankle || { x: 0.46, y: 0.91 });
-  const pRAnk = toScreen(landmarks.right_ankle || { x: 0.54, y: 0.91 });
+  const pNose = toScreen(landmarks.nose || { x: 0.50, y: 0.20 });
+  const pLSh = toScreen(landmarks.left_shoulder || { x: 0.38, y: 0.34 });
+  const pRSh = toScreen(landmarks.right_shoulder || { x: 0.62, y: 0.34 });
+  const pLElb = toScreen(landmarks.left_elbow || { x: 0.32, y: 0.48 });
+  const pRElb = toScreen(landmarks.right_elbow || { x: 0.68, y: 0.48 });
+  const pLWr = toScreen(landmarks.left_wrist || { x: 0.36, y: 0.62 });
+  const pRWr = toScreen(landmarks.right_wrist || { x: 0.64, y: 0.62 });
+  const pLHip = toScreen(landmarks.left_hip || { x: 0.42, y: 0.64 });
+  const pRHip = toScreen(landmarks.right_hip || { x: 0.58, y: 0.64 });
+  const pLKnee = landmarks.left_knee ? toScreen(landmarks.left_knee) : null;
+  const pRKnee = landmarks.right_knee ? toScreen(landmarks.right_knee) : null;
+  const pLAnk = landmarks.left_ankle ? toScreen(landmarks.left_ankle) : null;
+  const pRAnk = landmarks.right_ankle ? toScreen(landmarks.right_ankle) : null;
 
-  // Base anatomical scale factor proportional to subject distance/framing
+  // Base anatomical scale factor
   const shSpan = Math.hypot(pRSh.x - pLSh.x, pRSh.y - pLSh.y);
-  const baseUnit = Math.max(shSpan * 0.45, Math.min(w * 0.08, 48));
+  const baseUnit = Math.max(shSpan * 0.42, Math.min(w * 0.08, 48));
+
+  // Determine framing: selfie / close-up portrait vs full body
+  const isSelfieOrUpperBody =
+    (!pLKnee && !pRKnee) ||
+    (landmarks.left_hip && landmarks.left_hip.y > 0.72) ||
+    shSpan > w * 0.24;
 
   ctx.save();
   // Soft glowing body fill that solidifies the silhouette shape for instant readability
@@ -753,175 +759,143 @@ function drawAnatomicalHumanSilhouette(
   ctx.shadowColor = glowColor;
   ctx.shadowBlur = isAligned ? 18 : 10;
 
-  // 1. Omnidirectional Spine & Torso Geometry
+  // Midpoint between shoulders
   const midShoulder = { x: (pLSh.x + pRSh.x) / 2, y: (pLSh.y + pRSh.y) / 2 };
-  const midHip = { x: (pLHip.x + pRHip.x) / 2, y: (pLHip.y + pRHip.y) / 2 };
-  const spineDx = midShoulder.x - midHip.x;
-  const spineDy = midShoulder.y - midHip.y;
-  const spineLen = Math.hypot(spineDx, spineDy) || 1;
-  const uSpineX = spineDx / spineLen;
-  const uSpineY = spineDy / spineLen;
-  const uCrossX = -uSpineY;
-  const uCrossY = uSpineX;
 
-  // Waist sits along spine vector at 45% between hips and shoulders
-  const waistCenter = {
-    x: midHip.x + uSpineX * (spineLen * 0.45),
-    y: midHip.y + uSpineY * (spineLen * 0.45),
-  };
-  const waistHalfW = Math.max(14, shSpan * 0.38);
-  const waistR = { x: waistCenter.x + uCrossX * waistHalfW, y: waistCenter.y + uCrossY * waistHalfW };
-  const waistL = { x: waistCenter.x - uCrossX * waistHalfW, y: waistCenter.y - uCrossY * waistHalfW };
-
-  // Pelvis drops in opposite direction of spine (-uSpine)
-  const pelvisDrop = Math.max(12, baseUnit * 0.32);
-  const pelvisBottom = {
-    x: midHip.x - uSpineX * pelvisDrop,
-    y: midHip.y - uSpineY * pelvisDrop,
-  };
-
-  ctx.beginPath();
-  ctx.moveTo(pRSh.x, pRSh.y);
-  ctx.quadraticCurveTo(waistR.x, waistR.y, pRHip.x, pRHip.y);
-  ctx.quadraticCurveTo(pelvisBottom.x, pelvisBottom.y, pLHip.x, pLHip.y);
-  ctx.quadraticCurveTo(waistL.x, waistL.y, pLSh.x, pLSh.y);
-  ctx.quadraticCurveTo(midShoulder.x + uSpineX * 4, midShoulder.y + uSpineY * 4, pRSh.x, pRSh.y);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-
-  // 2. Head & Neck aligned with spine vector
-  const headMajor = baseUnit * 1.15;
-  const headMinor = baseUnit * 0.88;
+  // 1. Natural Human Head Oval with Tapered Jaw
+  const headRx = baseUnit * 0.88;
+  const headRy = headRx * 1.26;
   const headCenter = { x: pNose.x, y: pNose.y };
-  const headAngle = Math.atan2(uSpineY, uSpineX) + Math.PI / 2;
-
-  // Neck connecting jawline to shoulders
-  const jawCenter = {
-    x: headCenter.x - uSpineX * (headMajor * 0.45),
-    y: headCenter.y - uSpineY * (headMajor * 0.45),
-  };
-  const neckHalfW = baseUnit * 0.35;
-  const shNeckHalfW = baseUnit * 0.52;
-
-  const neckTopL = { x: jawCenter.x - uCrossX * neckHalfW, y: jawCenter.y - uCrossY * neckHalfW };
-  const neckTopR = { x: jawCenter.x + uCrossX * neckHalfW, y: jawCenter.y + uCrossY * neckHalfW };
-  const neckBotL = { x: midShoulder.x - uCrossX * shNeckHalfW, y: midShoulder.y - uCrossY * shNeckHalfW };
-  const neckBotR = { x: midShoulder.x + uCrossX * shNeckHalfW, y: midShoulder.y + uCrossY * shNeckHalfW };
 
   ctx.beginPath();
-  ctx.moveTo(neckTopL.x, neckTopL.y);
-  ctx.lineTo(neckBotL.x, neckBotL.y);
-  ctx.lineTo(neckBotR.x, neckBotR.y);
-  ctx.lineTo(neckTopR.x, neckTopR.y);
-  ctx.closePath();
+  ctx.ellipse(headCenter.x, headCenter.y, headRx, headRy, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
 
-  // Head Oval
+  // 2. Neck Contours (Two elegant curves connecting jaw to trapezius/shoulders - NO closed floating box!)
+  const neckHalfW = headRx * 0.38;
+  const jawBottomY = headCenter.y + headRy * 0.72;
+  const nL = { x: headCenter.x - neckHalfW, y: jawBottomY };
+  const nR = { x: headCenter.x + neckHalfW, y: jawBottomY };
+
+  // Neck left to shoulder left (smooth trapezius slope)
   ctx.beginPath();
-  ctx.ellipse(headCenter.x, headCenter.y, headMinor, headMajor, headAngle, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.moveTo(nL.x, nL.y);
+  ctx.quadraticCurveTo((nL.x + pLSh.x) / 2, (nL.y + pLSh.y) / 2 - 4, pLSh.x, pLSh.y);
   ctx.stroke();
 
-  // 3. Smooth Curved Limbs with True Perpendicular Normals
-  const drawCurvedLimb = (
-    p1: { x: number; y: number },
-    p2: { x: number; y: number },
-    p3: { x: number; y: number },
-    w1: number,
-    w2: number,
-    w3: number,
-    type: 'arm' | 'leg',
-    side: 'left' | 'right'
-  ) => {
-    // Vector 1 (p1 -> p2)
-    const dx1 = p2.x - p1.x;
-    const dy1 = p2.y - p1.y;
-    const len1 = Math.hypot(dx1, dy1) || 1;
-    const n1x = -dy1 / len1;
-    const n1y = dx1 / len1;
+  // Neck right to shoulder right (smooth trapezius slope)
+  ctx.beginPath();
+  ctx.moveTo(nR.x, nR.y);
+  ctx.quadraticCurveTo((nR.x + pRSh.x) / 2, (nR.y + pRSh.y) / 2 - 4, pRSh.x, pRSh.y);
+  ctx.stroke();
 
-    // Vector 2 (p2 -> p3)
-    const dx2 = p3.x - p2.x;
-    const dy2 = p3.y - p2.y;
-    const len2 = Math.hypot(dx2, dy2) || 1;
-    const n2x = -dy2 / len2;
-    const n2y = dx2 / len2;
-    const t2x = dx2 / len2;
-    const t2y = dy2 / len2;
+  // Gentle neckline scoop / collarbone curve
+  ctx.beginPath();
+  ctx.moveTo(nL.x, nL.y + 8);
+  ctx.quadraticCurveTo(midShoulder.x, nL.y + 22, nR.x, nR.y + 8);
+  ctx.stroke();
 
-    // Bisector normal at middle joint
-    const sumNx = n1x + n2x;
-    const sumNy = n1y + n2y;
-    const sumLen = Math.hypot(sumNx, sumNy) || 1;
-    const nMidX = sumNx / sumLen;
-    const nMidY = sumNy / sumLen;
+  // 3. Torso & Body Outlines
+  if (isSelfieOrUpperBody) {
+    // Upper body / selfie framing: clean torso contour flowing down naturally
+    const torsoBottomY = Math.max(pLSh.y + baseUnit * 2.8, h * 0.95);
+    const torsoL = { x: pLSh.x - baseUnit * 0.25, y: torsoBottomY };
+    const torsoR = { x: pRSh.x + baseUnit * 0.25, y: torsoBottomY };
 
-    // Miter angle limiter
-    const dot = n1x * n2x + n1y * n2y;
-    const miter = Math.min(1.35, Math.max(0.75, 1 / Math.sqrt(Math.max(0.3, (1 + dot) / 2))));
-    const jointW = w2 * miter;
-
-    // Outer contour points
-    const o1 = { x: p1.x + n1x * w1, y: p1.y + n1y * w1 };
-    const o2 = { x: p2.x + nMidX * jointW, y: p2.y + nMidY * jointW };
-    const o3 = { x: p3.x + n2x * w3, y: p3.y + n2y * w3 };
-
-    // Inner contour points
-    const i3 = { x: p3.x - n2x * w3, y: p3.y - n2y * w3 };
-    const i2 = { x: p2.x - nMidX * jointW, y: p2.y - nMidY * jointW };
-    const i1 = { x: p1.x - n1x * w1, y: p1.y - n1y * w1 };
-
+    // Torso outline
     ctx.beginPath();
-    ctx.moveTo(o1.x, o1.y);
-    ctx.quadraticCurveTo(o2.x, o2.y, o3.x, o3.y);
+    ctx.moveTo(pLSh.x, pLSh.y);
+    ctx.quadraticCurveTo(pLSh.x - 10, (pLSh.y + torsoL.y) / 2, torsoL.x, torsoL.y);
+    ctx.lineTo(torsoR.x, torsoR.y);
+    ctx.quadraticCurveTo(pRSh.x + 10, (pRSh.y + torsoR.y) / 2, pRSh.x, pRSh.y);
+    ctx.fill();
+    ctx.stroke();
 
-    if (type === 'arm') {
-      // Natural hand capsule extending slightly past wrist
-      const handTip = { x: p3.x + t2x * (w3 * 1.5), y: p3.y + t2y * (w3 * 1.5) };
-      ctx.quadraticCurveTo(
-        handTip.x + n2x * (w3 * 0.6),
-        handTip.y + n2y * (w3 * 0.6),
-        handTip.x,
-        handTip.y
-      );
-      ctx.quadraticCurveTo(
-        handTip.x - n2x * (w3 * 0.6),
-        handTip.y - n2y * (w3 * 0.6),
-        i3.x,
-        i3.y
-      );
-    } else {
-      // Natural foot profile extending slightly outward
-      const footSign = side === 'left' ? -1 : 1;
-      const toeX = p3.x + (t2x * 0.3 + footSign * 0.7) * (w3 * 2.2);
-      const toeY = p3.y + (t2y * 0.3 + 0.7) * (w3 * 1.8) + 4;
-      ctx.lineTo(toeX, toeY);
-      ctx.lineTo(i3.x, i3.y);
-    }
+    // Arms: check if user has raised arm gestures (e.g. hand touching hair/chin)
+    const checkArmGesture = (pSh: Point2D, pElb: Point2D, pWr: Point2D, side: 'left' | 'right') => {
+      const isRaised =
+        pWr.y < pSh.y + baseUnit * 0.6 ||
+        Math.hypot(pWr.x - headCenter.x, pWr.y - headCenter.y) < baseUnit * 2.2;
+      const sign = side === 'left' ? -1 : 1;
 
-    ctx.quadraticCurveTo(i2.x, i2.y, i1.x, i1.y);
+      if (isRaised) {
+        // Expressive gesture arm (curving up to head/collarbone)
+        ctx.beginPath();
+        ctx.moveTo(pSh.x, pSh.y);
+        ctx.quadraticCurveTo(pElb.x + sign * 14, pElb.y, pWr.x, pWr.y);
+        ctx.stroke();
+
+        // Natural hand profile
+        ctx.beginPath();
+        ctx.ellipse(pWr.x, pWr.y, baseUnit * 0.28, baseUnit * 0.22, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        // Natural resting arm contour flanking the torso
+        ctx.beginPath();
+        ctx.moveTo(pSh.x, pSh.y);
+        ctx.quadraticCurveTo(pElb.x + sign * 12, pElb.y, pWr.x + sign * 8, pWr.y);
+        ctx.stroke();
+      }
+    };
+
+    checkArmGesture(pLSh, pLElb, pLWr, 'left');
+    checkArmGesture(pRSh, pRElb, pRWr, 'right');
+
+  } else {
+    // Full body framing: natural torso and legs
+    const waistW = shSpan * 0.38;
+    const midTorsoY = (midShoulder.y + (pLHip.y + pRHip.y) / 2) / 2;
+    const waistL = { x: midShoulder.x - waistW, y: midTorsoY };
+    const waistR = { x: midShoulder.x + waistW, y: midTorsoY };
+
+    // Torso outline
+    ctx.beginPath();
+    ctx.moveTo(pLSh.x, pLSh.y);
+    ctx.quadraticCurveTo(waistL.x, waistL.y, pLHip.x, pLHip.y);
+    ctx.lineTo(pRHip.x, pRHip.y);
+    ctx.quadraticCurveTo(waistR.x, waistR.y, pRSh.x, pRSh.y);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-  };
 
-  const armW_sh = baseUnit * 0.34;
-  const armW_elb = baseUnit * 0.26;
-  const armW_wr = baseUnit * 0.18;
+    // Arms
+    const drawFullArm = (pSh: Point2D, pElb: Point2D, pWr: Point2D, sign: number) => {
+      ctx.beginPath();
+      ctx.moveTo(pSh.x, pSh.y);
+      ctx.quadraticCurveTo(pElb.x + sign * 14, pElb.y, pWr.x, pWr.y);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(pWr.x, pWr.y, baseUnit * 0.20, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    };
 
-  const legW_hip = baseUnit * 0.44;
-  const legW_knee = baseUnit * 0.34;
-  const legW_ank = baseUnit * 0.22;
+    drawFullArm(pLSh, pLElb, pLWr, -1);
+    drawFullArm(pRSh, pRElb, pRWr, 1);
 
-  // Draw Arms
-  drawCurvedLimb(pLSh, pLElb, pLWr, armW_sh, armW_elb, armW_wr, 'arm', 'left');
-  drawCurvedLimb(pRSh, pRElb, pRWr, armW_sh, armW_elb, armW_wr, 'arm', 'right');
+    // Legs
+    if (pLKnee && pLAnk) {
+      ctx.beginPath();
+      ctx.moveTo(pLHip.x, pLHip.y);
+      ctx.quadraticCurveTo(pLKnee.x - 10, pLKnee.y, pLAnk.x, pLAnk.y);
+      ctx.lineTo(pLAnk.x - 14, pLAnk.y);
+      ctx.quadraticCurveTo(pLKnee.x + 10, pLKnee.y, pLHip.x + 10, pLHip.y);
+      ctx.fill();
+      ctx.stroke();
+    }
 
-  // Draw Legs
-  drawCurvedLimb(pLHip, pLKnee, pLAnk, legW_hip, legW_knee, legW_ank, 'leg', 'left');
-  drawCurvedLimb(pRHip, pRKnee, pRAnk, legW_hip, legW_knee, legW_ank, 'leg', 'right');
+    if (pRKnee && pRAnk) {
+      ctx.beginPath();
+      ctx.moveTo(pRHip.x, pRHip.y);
+      ctx.quadraticCurveTo(pRKnee.x + 10, pRKnee.y, pRAnk.x, pRAnk.y);
+      ctx.lineTo(pRAnk.x + 14, pRAnk.y);
+      ctx.quadraticCurveTo(pRKnee.x - 10, pRKnee.y, pRHip.x - 10, pRHip.y);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
 
   ctx.restore();
 }
