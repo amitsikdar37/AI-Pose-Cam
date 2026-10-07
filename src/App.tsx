@@ -307,6 +307,11 @@ export const App: React.FC = () => {
       const info = await cameraService.switchCamera(videoRef.current);
       setSensorInfo(info);
       setTorchActive(false);
+      setAiNotice({
+        type: 'success',
+        text: `Switched to ${info.facingMode === 'user' ? 'Front Selfie Lens' : 'Rear Main Lens'} (${info.maxMegapixels} MP Native)`,
+      });
+      setTimeout(() => setAiNotice(null), 2500);
     } catch (e: any) {
       console.error('Camera switch failed:', e);
       setAiNotice({
@@ -326,22 +331,28 @@ export const App: React.FC = () => {
   };
 
   const handleToggleResolutionMode = async () => {
-    const current = sensorInfo?.resolutionMode || '32mp';
-    const nextMode: ResolutionMode = current === '32mp' ? '4mp' : current === '4mp' ? 'auto' : '32mp';
-    const updated = await cameraService.setResolutionMode(nextMode);
-    setSensorInfo(updated);
+    if (!sensorInfo) return;
     triggerHaptic('light');
+    const isFront = sensorInfo.facingMode === 'user';
+    const cameraName = isFront ? 'Front Selfie Lens' : 'Rear Main Lens';
     setAiNotice({
       type: 'success',
-      text: `Sensor set to ${updated.maxMegapixels} MP (${nextMode.toUpperCase()})`,
+      text: `📸 ${cameraName}: ${sensorInfo.maxMegapixels} MP Native (${sensorInfo.maxWidth}×${sensorInfo.maxHeight})`,
     });
-    setTimeout(() => setAiNotice(null), 2500);
+    setTimeout(() => setAiNotice(null), 3000);
   };
 
   const handleSetResolutionMode = async (mode: ResolutionMode) => {
     const updated = await cameraService.setResolutionMode(mode);
     setSensorInfo(updated);
     triggerHaptic('light');
+    setAiNotice({
+      type: 'success',
+      text: mode === 'max'
+        ? `📸 Resolution set to Native Maximum (${updated.maxMegapixels} MP)`
+        : '📸 Resolution set to Standard 12 MP',
+    });
+    setTimeout(() => setAiNotice(null), 2500);
   };
 
   const handleSetZoom = async (zoomLevel: number) => {

@@ -1,4 +1,4 @@
-import type { CameraSensorInfo, ResolutionMode } from '../types/camera';
+import type { CameraSensorInfo, CameraHardwareProfile, ResolutionMode } from '../types/camera';
 
 // TypeScript declarations for ImageCapture API
 declare class ImageCapture {
@@ -23,10 +23,41 @@ export class CameraService {
   private imageCapture: ImageCapture | null = null;
   private facingMode: 'user' | 'environment' = 'environment';
   private torchEnabled = false;
-  private sensorMaxWidth = 6528;
-  private sensorMaxHeight = 4896;
-  private maxSensorMegapixels = 32.0;
-  private resolutionMode: ResolutionMode = '32mp'; // Default to 32MP optical mode for selfies
+
+  // Dynamic hardware sensor resolution values (no hardcoding)
+  private sensorMaxWidth = 4032;
+  private sensorMaxHeight = 3024;
+  private maxSensorMegapixels = 12.0;
+  private resolutionMode: ResolutionMode = 'max';
+
+  // Detected hardware profiles for both cameras
+  private hardwareProfiles: {
+    user?: CameraHardwareProfile;
+    environment?: CameraHardwareProfile;
+  } = {};
+
+  constructor() {
+    this.loadStoredProfiles();
+  }
+
+  private loadStoredProfiles(): void {
+    try {
+      const stored = localStorage.getItem('posecam_camera_hw_profiles');
+      if (stored) {
+        this.hardwareProfiles = JSON.parse(stored);
+      }
+    } catch (e) {
+      console.warn('Could not read cached camera hardware profiles:', e);
+    }
+  }
+
+  private saveStoredProfiles(): void {
+    try {
+      localStorage.setItem('posecam_camera_hw_profiles', JSON.stringify(this.hardwareProfiles));
+    } catch (e) {
+      console.warn('Could not cache camera hardware profiles:', e);
+    }
+  }
 
   public getFacingMode(): 'user' | 'environment' {
     return this.facingMode;
@@ -41,147 +72,140 @@ export class CameraService {
     return this.getSensorInfo();
   }
 
+  public getHardwareProfiles(): {
+    user?: CameraHardwareProfile;
+    environment?: CameraHardwareProfile;
+  } {
+    return this.hardwareProfiles;
+  }
+
+  private isValidVideoStream(stream: MediaStream | null): boolean {
+    if (!stream) return false;
+    const tracks = stream.getVideoTracks();
+    if (!tracks || tracks.length === 0) return false;
+    const track = tracks[0];
+    return track.readyState === 'live' && track.enabled;
+  }
+
   /**
-   * Resolves the most reliable camera stream using deviceId enumeration and progressive constraints.
-   * Completely avoids binding to black auxiliary/depth sensors on multi-camera Android devices.
+   * Acquires the most reliable, crisp video preview stream.
+   * Prioritizes standard 4:3 native preview (1920x1440) using facingMode: { ideal: facing }.
+   * This allows the Android/iOS OS Camera HAL to select the primary lens,
+   * initialize auto-exposure, ISP color processing, and prevents black auxiliary lens locks.
+   * Extreme sensor photo resolutions are handled by ImageCapture.takePhoto() directly from the ISP.
    */
   private async obtainStream(facing: 'user' | 'environment'): Promise<MediaStream> {
-    let videoDevices: MediaDeviceInfo[] = [];
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      videoDevices = devices.filter((d) => d.kind === 'videoinput');
-    } catch (e) {
-      console.warn('Camera device enumeration error:', e);
-    }
+    const previewConstraints = {
+      width: { ideal: 1920 },
+      height: { ideal: 1440 },
+      aspectRatio: { ideal: 4 / 3 },
+    };
 
-    // Filter out black/dummy sensors (depth, IR, bokeh, TOF)
-    const activeSensors = videoDevices.filter((d) => {
-      const label = (d.label || '').toLowerCase();
-      return (
-        !label.includes('depth') &&
-        !label.includes('bokeh') &&
-        !label.includes('tof') &&
-        !label.includes('ir') &&
-        !label.includes('infrared')
-      );
-    });
-
-    const rearDevices = activeSensors.filter((d) => {
-      const label = (d.label || '').toLowerCase();
-      return (
-        label.includes('back') ||
-        label.includes('rear') ||
-        label.includes('environment') ||
-        label.includes('camera 0') ||
-        label.includes('facing 0') ||
-        label.includes('main')
-      );
-    });
-
-    const frontDevices = activeSensors.filter((d) => {
-      const label = (d.label || '').toLowerCase();
-      return (
-        label.includes('front') ||
-        label.includes('user') ||
-        label.includes('selfie') ||
-        label.includes('camera 1') ||
-        label.includes('facing 1')
-      );
-    });
-
-    // For front camera, prefer wide selfie lens if explicitly labeled
-    const wideFrontDevice = frontDevices.find((d) => {
-      const l = (d.label || '').toLowerCase();
-      return l.includes('wide') || l.includes('0.7') || l.includes('ultra');
-    });
-
-    // For rear camera, select the primary wide camera (exclude telephoto, zoom, macro)
-    const mainRearDevice = rearDevices.find((d) => {
-      const l = (d.label || '').toLowerCase();
-      return !l.includes('tele') && !l.includes('zoom') && !l.includes('macro');
-    }) || rearDevices[0];
-
-    const targetDeviceId = facing === 'environment'
-      ? mainRearDevice?.deviceId
-      : wideFrontDevice?.deviceId;
-
-    // Use uncropped 4:3 native camera aspect ratio for live preview.
-    // Never force 9:16 narrow crop which causes the camera sensor to digitally zoom in!
-    const previewW = 1920;
-    const previewH = 1440;
-
-    // Attempt 1: Target specific physical device ID (bypasses Android multi-lens ambiguity)
-    if (targetDeviceId) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            deviceId: { exact: targetDeviceId },
-            width: { ideal: previewW },
-            height: { ideal: previewH },
-            aspectRatio: { ideal: 4 / 3 },
-          },
-        });
-        if (stream && stream.getVideoTracks().length > 0) {
-          return stream;
-        }
-      } catch (err) {
-        console.warn('Target deviceId camera stream failed, falling back:', err);
-      }
-    }
-
-    // Attempt 2: Exact facingMode with standard 4:3 preview
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          facingMode: { exact: facing },
-          width: { ideal: previewW },
-          height: { ideal: previewH },
-          aspectRatio: { ideal: 4 / 3 },
-        },
-      });
-      if (stream && stream.getVideoTracks().length > 0) {
-        return stream;
-      }
-    } catch (err) {
-      console.warn('Exact facingMode failed, trying ideal facingMode:', err);
-    }
-
-    // Attempt 3: Ideal facingMode with 4:3 preview
+    // Attempt 1: Standard facingMode with ideal preference and 4:3 preview
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: {
           facingMode: { ideal: facing },
-          width: { ideal: previewW },
-          height: { ideal: previewH },
-          aspectRatio: { ideal: 4 / 3 },
+          ...previewConstraints,
         },
       });
-      if (stream && stream.getVideoTracks().length > 0) {
+      if (this.isValidVideoStream(stream)) {
         return stream;
       }
     } catch (err) {
-      console.warn('Ideal facingMode with resolution failed, trying pure facingMode:', err);
+      console.warn(`[CameraService] Attempt 1 (ideal ${facing} with preview dimensions) failed:`, err);
     }
 
-    // Attempt 4: Pure facingMode without resolution constraints
+    // Attempt 2: Exact facingMode with 4:3 preview
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: {
-          facingMode: facing,
+          facingMode: { exact: facing },
+          ...previewConstraints,
         },
       });
-      if (stream && stream.getVideoTracks().length > 0) {
+      if (this.isValidVideoStream(stream)) {
         return stream;
       }
     } catch (err) {
-      console.warn('Pure facingMode failed, falling back to any video track:', err);
+      console.warn(`[CameraService] Attempt 2 (exact ${facing} with preview dimensions) failed:`, err);
     }
 
-    // Attempt 5: Final fallback to default video track
+    // Attempt 3: Ideal facingMode unconstrained (for devices that reject 1920x1440)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: facing },
+        },
+      });
+      if (this.isValidVideoStream(stream)) {
+        return stream;
+      }
+    } catch (err) {
+      console.warn(`[CameraService] Attempt 3 (ideal ${facing} unconstrained) failed:`, err);
+    }
+
+    // Attempt 4: Exact facingMode unconstrained
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { exact: facing },
+        },
+      });
+      if (this.isValidVideoStream(stream)) {
+        return stream;
+      }
+    } catch (err) {
+      console.warn(`[CameraService] Attempt 4 (exact ${facing} unconstrained) failed:`, err);
+    }
+
+    // Attempt 5: Enumerate devices and target non-auxiliary matching physical camera
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter((d) => d.kind === 'videoinput');
+
+      const matchingDevices = videoDevices.filter((d) => {
+        const l = (d.label || '').toLowerCase();
+        if (
+          l.includes('depth') ||
+          l.includes('bokeh') ||
+          l.includes('tof') ||
+          l.includes('ir') ||
+          l.includes('infrared')
+        ) {
+          return false;
+        }
+        if (facing === 'environment') {
+          return l.includes('back') || l.includes('rear') || l.includes('environment') || l.includes('0');
+        } else {
+          return l.includes('front') || l.includes('user') || l.includes('selfie') || l.includes('1');
+        }
+      });
+
+      for (const dev of matchingDevices) {
+        if (!dev.deviceId) continue;
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+              deviceId: { exact: dev.deviceId },
+              ...previewConstraints,
+            },
+          });
+          if (this.isValidVideoStream(stream)) {
+            return stream;
+          }
+        } catch {}
+      }
+    } catch (err) {
+      console.warn('[CameraService] Attempt 5 (enumeration fallback) failed:', err);
+    }
+
+    // Attempt 6: Universal fallback to default video track
     return await navigator.mediaDevices.getUserMedia({
       audio: false,
       video: true,
@@ -201,20 +225,37 @@ export class CameraService {
     // 2. Stop all previous camera tracks cleanly
     this.stopCamera();
 
-    // 3. Android Camera2 HAL Handover Sleep (200ms)
-    // Mandatory for Android OS to release hardware sensor lock before activating the other camera lens
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    // 3. Android Camera2 HAL Handover Sleep (300ms)
+    // Allows mobile camera driver to release hardware locks before opening the next lens
+    await new Promise((resolve) => setTimeout(resolve, 300));
 
-    this.facingMode = preferredFacing;
     this.stream = await this.obtainStream(preferredFacing);
+    this.videoTrack = this.stream.getVideoTracks()[0] || null;
 
-    // 4. Attach new stream to video element
+    // Synchronize actual facingMode reported by track settings
+    const trackFacing = this.videoTrack?.getSettings?.()?.facingMode as ('user' | 'environment') | undefined;
+    this.facingMode = trackFacing || preferredFacing;
+
+    // 4. If track was initially muted (Android hardware spinup), wait for unmute
+    if (this.videoTrack && this.videoTrack.muted) {
+      await new Promise<void>((res) => {
+        const onUnmute = () => {
+          this.videoTrack?.removeEventListener('unmute', onUnmute);
+          res();
+        };
+        this.videoTrack?.addEventListener('unmute', onUnmute);
+        setTimeout(res, 500);
+      });
+    }
+
+    // 5. Attach new stream to video element
     videoElement.srcObject = this.stream;
+    videoElement.playsInline = true;
+    videoElement.muted = true;
     videoElement.setAttribute('playsinline', 'true');
     videoElement.setAttribute('autoplay', 'true');
-    videoElement.muted = true;
 
-    // 5. Wait for loadedmetadata & active frames so the viewfinder never freezes on black
+    // 6. Wait for loadedmetadata or active playback so viewfinder never freezes on black
     await new Promise<void>((resolve) => {
       if (videoElement.readyState >= 2 && videoElement.videoWidth > 0) {
         resolve();
@@ -225,12 +266,15 @@ export class CameraService {
             isDone = true;
             videoElement.removeEventListener('loadedmetadata', done);
             videoElement.removeEventListener('canplay', done);
+            videoElement.removeEventListener('playing', done);
             resolve();
           }
         };
         videoElement.addEventListener('loadedmetadata', done);
         videoElement.addEventListener('canplay', done);
-        setTimeout(done, 800);
+        videoElement.addEventListener('playing', done);
+        videoElement.play().catch(() => {});
+        setTimeout(done, 1000);
       }
     });
 
@@ -240,9 +284,17 @@ export class CameraService {
       console.warn('Video element play warning:', e);
     }
 
-    this.videoTrack = this.stream.getVideoTracks()[0] || null;
+    // 7. Initialize ImageCapture API if supported by browser
+    if (this.videoTrack && 'ImageCapture' in window) {
+      try {
+        // @ts-ignore
+        this.imageCapture = new (window as any).ImageCapture(this.videoTrack);
+      } catch (e) {
+        console.warn('ImageCapture constructor error:', e);
+      }
+    }
 
-    // Explicitly reset hardware optical/digital zoom to widest angle (minimum zoom)
+    // 8. Reset zoom to 1.0 (min zoom)
     if (this.videoTrack) {
       try {
         const caps = (this.videoTrack.getCapabilities?.() || {}) as any;
@@ -258,16 +310,89 @@ export class CameraService {
       }
     }
 
-    if (this.videoTrack && 'ImageCapture' in window) {
-      try {
-        // @ts-ignore
-        this.imageCapture = new (window as any).ImageCapture(this.videoTrack);
-      } catch (e) {
-        console.warn('ImageCapture constructor error:', e);
+    // 9. Dynamically discover and register hardware sensor capabilities
+    await this.inspectAndRegisterHardware(this.facingMode);
+
+    return this.getSensorInfo();
+  }
+
+  /**
+   * Inspects the active camera sensor and determines true maximum hardware capabilities
+   */
+  private async inspectAndRegisterHardware(facing: 'user' | 'environment'): Promise<void> {
+    let maxWidth = 1920;
+    let maxHeight = 1080;
+    let hasImageCapture = false;
+    let torchAvailable = false;
+    let zoomMin: number | undefined;
+    let zoomMax: number | undefined;
+
+    if (this.videoTrack) {
+      const settings = this.videoTrack.getSettings?.() || {};
+      maxWidth = settings.width || 1920;
+      maxHeight = settings.height || 1080;
+
+      const caps = (this.videoTrack.getCapabilities?.() || {}) as any;
+      if (caps.width?.max) maxWidth = Math.max(maxWidth, caps.width.max);
+      if (caps.height?.max) maxHeight = Math.max(maxHeight, caps.height.max);
+      if (caps.torch) torchAvailable = true;
+      if (caps.zoom) {
+        zoomMin = caps.zoom.min;
+        zoomMax = caps.zoom.max;
       }
     }
 
-    return this.getSensorInfo();
+    if (this.imageCapture) {
+      hasImageCapture = true;
+      try {
+        const photoCaps = await this.imageCapture.getPhotoCapabilities();
+        if (photoCaps.imageWidth?.max) {
+          maxWidth = Math.max(maxWidth, photoCaps.imageWidth.max);
+        }
+        if (photoCaps.imageHeight?.max) {
+          maxHeight = Math.max(maxHeight, photoCaps.imageHeight.max);
+        }
+      } catch (err) {
+        console.warn('Error reading photo capabilities:', err);
+      }
+    }
+
+    // Normalize landscape orientation for sensor specs (e.g. 4032 x 3024)
+    const normalizedW = Math.max(maxWidth, maxHeight);
+    const normalizedH = Math.min(maxWidth, maxHeight);
+    const maxMegapixels = Number(((normalizedW * normalizedH) / 1_000_000).toFixed(1));
+
+    // Determine target facing profile bucket
+    const trackLabel = (this.videoTrack?.label || '').toLowerCase();
+    let detectedFacing = facing;
+    if (trackLabel.includes('front') || trackLabel.includes('user') || trackLabel.includes('selfie')) {
+      detectedFacing = 'user';
+    } else if (trackLabel.includes('back') || trackLabel.includes('rear') || trackLabel.includes('environment')) {
+      detectedFacing = 'environment';
+    }
+
+    const label = this.videoTrack?.label || (detectedFacing === 'user' ? 'Front Camera' : 'Back Camera');
+
+    // Update current active sensor parameters
+    this.sensorMaxWidth = normalizedW;
+    this.sensorMaxHeight = normalizedH;
+    this.maxSensorMegapixels = maxMegapixels;
+
+    // Cache the detected hardware profile for this camera facing
+    this.hardwareProfiles[detectedFacing] = {
+      facing: detectedFacing,
+      label,
+      deviceId: this.videoTrack?.getSettings?.()?.deviceId,
+      maxWidth: normalizedW,
+      maxHeight: normalizedH,
+      maxMegapixels,
+      hasImageCapture,
+      supportsTorch: torchAvailable,
+      zoomMin,
+      zoomMax,
+    };
+
+    this.saveStoredProfiles();
   }
 
   public async setZoom(zoomLevel: number): Promise<boolean> {
@@ -288,15 +413,13 @@ export class CameraService {
     return false;
   }
 
-
-  /**
-   * Switches seamlessly between Front (Selfie) and Back (Rear) cameras with zero black-screen
-   */
   public async switchCamera(videoElement: HTMLVideoElement): Promise<CameraSensorInfo> {
-    const nextFacing: 'user' | 'environment' = this.facingMode === 'user' ? 'environment' : 'user';
+    const currentActualFacing =
+      (this.videoTrack?.getSettings?.()?.facingMode as ('user' | 'environment') | undefined) ||
+      this.facingMode;
+    const nextFacing: 'user' | 'environment' = currentActualFacing === 'user' ? 'environment' : 'user';
     return this.startCamera(videoElement, nextFacing);
   }
-
 
   public async toggleTorch(): Promise<boolean> {
     if (!this.videoTrack) return false;
@@ -317,27 +440,20 @@ export class CameraService {
   }
 
   public async getSensorInfo(): Promise<CameraSensorInfo> {
-    let maxWidth = 1920;
-    let maxHeight = 1080;
-    let hasImageCapture = false;
-    let torchAvailable = false;
     const isFront = this.facingMode === 'user';
     let cameraLabel = isFront ? 'Front Camera (Selfie)' : 'Back Camera (Main Lens)';
+    let torchAvailable = false;
     let zoomMin: number | undefined;
     let zoomMax: number | undefined;
     let zoomCurrent: number | undefined;
 
     if (this.videoTrack) {
       const settings = this.videoTrack.getSettings?.() || {};
-      maxWidth = settings.width || 1920;
-      maxHeight = settings.height || 1080;
       if (this.videoTrack.label) {
         cameraLabel = this.videoTrack.label;
       }
 
       const caps = (this.videoTrack.getCapabilities?.() || {}) as any;
-      if (caps.width?.max) maxWidth = Math.max(maxWidth, caps.width.max);
-      if (caps.height?.max) maxHeight = Math.max(maxHeight, caps.height.max);
       if (caps.torch) torchAvailable = true;
       if (caps.zoom) {
         zoomMin = caps.zoom.min;
@@ -346,60 +462,11 @@ export class CameraService {
       }
     }
 
-    if (this.imageCapture) {
-      hasImageCapture = true;
-      try {
-        const photoCaps = await this.imageCapture.getPhotoCapabilities();
-        if (photoCaps.imageWidth?.max) {
-          maxWidth = Math.max(maxWidth, photoCaps.imageWidth.max);
-        }
-        if (photoCaps.imageHeight?.max) {
-          maxHeight = Math.max(maxHeight, photoCaps.imageHeight.max);
-        }
-      } catch (err) {
-        console.warn('Error reading photo capabilities:', err);
-      }
-    }
-
-    // Modern mobile Android front cameras often report ~4.0 MP (2304x1728) in WebRTC video stream
-    // due to 4-in-1 Quad-Bayer pixel binning from their physical 32MP sensor.
-    const isQuadBayerBinned = isFront && maxWidth <= 2560 && maxHeight <= 1920;
-
-    let displayMaxW = maxWidth;
-    let displayMaxH = maxHeight;
-    let displayMegapixels = Number(((maxWidth * maxHeight) / 1_000_000).toFixed(1));
-
-    if (this.resolutionMode === '32mp') {
-      displayMaxW = 6528;
-      displayMaxH = 4896;
-      displayMegapixels = 32.0;
-    } else if (this.resolutionMode === '48mp') {
-      displayMaxW = 8000;
-      displayMaxH = 6000;
-      displayMegapixels = 48.0;
-    } else if (this.resolutionMode === '50mp') {
-      displayMaxW = 8192;
-      displayMaxH = 6144;
-      displayMegapixels = 50.0;
-    } else if (this.resolutionMode === '12mp') {
-      displayMaxW = 4000;
-      displayMaxH = 3000;
-      displayMegapixels = 12.0;
-    } else if (this.resolutionMode === '4mp') {
-      displayMaxW = 2304;
-      displayMaxH = 1728;
-      displayMegapixels = 4.0;
-    }
-
-    this.sensorMaxWidth = displayMaxW;
-    this.sensorMaxHeight = displayMaxH;
-    this.maxSensorMegapixels = displayMegapixels;
-
     return {
-      maxWidth: displayMaxW,
-      maxHeight: displayMaxH,
-      maxMegapixels: displayMegapixels,
-      hasImageCapture,
+      maxWidth: this.sensorMaxWidth,
+      maxHeight: this.sensorMaxHeight,
+      maxMegapixels: this.maxSensorMegapixels,
+      hasImageCapture: Boolean(this.imageCapture),
       facingMode: this.facingMode,
       torchAvailable,
       cameraLabel,
@@ -407,13 +474,14 @@ export class CameraService {
       zoomMax,
       zoomCurrent,
       resolutionMode: this.resolutionMode,
-      isQuadBayerBinned,
+      hardwareProfiles: this.hardwareProfiles,
     };
   }
 
   /**
-   * Captures the photo with zero lag, correct selfie orientation (not inverted),
-   * and preserves the full optical sensor megapixels (e.g. 32MP).
+   * Captures the photo at the MAXIMUM optical/digital sensor capability dynamically.
+   * Uses ImageCapture still hardware snapshot when available, with a sufficient 3000ms timeout
+   * so mobile camera ISPs have time to autofocus, expose, and compress the full-resolution photo.
    */
   public async captureFullQualityPhoto(videoElement: HTMLVideoElement): Promise<{
     blob: Blob;
@@ -426,13 +494,6 @@ export class CameraService {
     isFullSensor: boolean;
   }> {
     const isFront = this.facingMode === 'user';
-    const cameraUsed = isFront
-      ? (this.resolutionMode === '32mp'
-          ? 'Front Camera (32 MP Full Sensor)'
-          : 'Front Camera (Selfie)')
-      : (this.resolutionMode === '32mp'
-          ? 'Back Camera (32 MP Ultra HD)'
-          : 'Back Camera (Optical Sensor)');
 
     const vWidth = videoElement.videoWidth || 1920;
     const vHeight = videoElement.videoHeight || 1080;
@@ -440,32 +501,39 @@ export class CameraService {
     let photoBlob: Blob | null = null;
     let isFullSensor = false;
 
-    // Calculate orientation-aware target dimensions
+    // Calculate orientation-aware target dimensions based on detected hardware max
     const isPortrait = vHeight > vWidth || (typeof window !== 'undefined' && window.innerHeight > window.innerWidth);
-    const targetW = this.sensorMaxWidth > 0 ? this.sensorMaxWidth : 6528;
-    const targetH = this.sensorMaxHeight > 0 ? this.sensorMaxHeight : 4896;
+    let targetW = this.sensorMaxWidth > 0 ? this.sensorMaxWidth : 4032;
+    let targetH = this.sensorMaxHeight > 0 ? this.sensorMaxHeight : 3024;
+
+    if (this.resolutionMode === '12mp') {
+      targetW = 4032;
+      targetH = 3024;
+    }
 
     let finalW = isPortrait ? Math.min(targetW, targetH) : Math.max(targetW, targetH);
     let finalH = isPortrait ? Math.max(targetW, targetH) : Math.min(targetW, targetH);
 
-    // 1. Try Still Sensor Capture via ImageCapture API with a 350ms race timeout
+    // 1. Try Still Sensor Capture via ImageCapture API
     if (this.imageCapture) {
       try {
         const photoCaps = await this.imageCapture.getPhotoCapabilities().catch(() => null);
         const photoSettings: any = {};
-        if (photoCaps?.imageWidth?.max) {
-          photoSettings.imageWidth = Math.max(photoCaps.imageWidth.max, targetW);
+        
+        if (this.resolutionMode === 'max' && photoCaps?.imageWidth?.max && photoCaps?.imageHeight?.max) {
+          photoSettings.imageWidth = photoCaps.imageWidth.max;
+          photoSettings.imageHeight = photoCaps.imageHeight.max;
+        } else if (photoCaps?.imageWidth?.max) {
+          photoSettings.imageWidth = Math.min(photoCaps.imageWidth.max, targetW);
+          photoSettings.imageHeight = Math.min(photoCaps?.imageHeight?.max || targetH, targetH);
         } else {
           photoSettings.imageWidth = targetW;
-        }
-        if (photoCaps?.imageHeight?.max) {
-          photoSettings.imageHeight = Math.max(photoCaps.imageHeight.max, targetH);
-        } else {
           photoSettings.imageHeight = targetH;
         }
 
-        const takePhotoPromise = this.imageCapture.takePhoto(photoSettings).catch(() => null);
-        const timeoutPromise = new Promise<null>((res) => setTimeout(() => res(null), 350));
+        // Give mobile camera ISP up to 3000ms for autofocus, metering, and full-resolution JPEG compression
+        const takePhotoPromise = this.imageCapture.takePhoto(photoSettings);
+        const timeoutPromise = new Promise<null>((res) => setTimeout(() => res(null), 3000));
         const stillBlob = await Promise.race([takePhotoPromise, timeoutPromise]);
 
         if (stillBlob && stillBlob.size > 0) {
@@ -478,15 +546,28 @@ export class CameraService {
           }
         }
       } catch (e) {
-        console.warn('ImageCapture still capture skipped:', e);
+        console.warn('ImageCapture hardware capture skipped or timed out:', e);
       }
     }
 
-    // 2. High-Precision Zero-Shutter-Lag Canvas Frame Capture (instant fallback)
+    // 2. High-Precision Full-Resolution Fallback (grabs native stream bitmap or canvas)
     if (!photoBlob) {
+      let sourceBitmap: ImageBitmap | null = null;
+      if (this.imageCapture && 'grabFrame' in this.imageCapture) {
+        try {
+          sourceBitmap = await this.imageCapture.grabFrame();
+        } catch {}
+      }
+
+      const nativeSourceW = sourceBitmap?.width || videoElement.videoWidth || 1920;
+      const nativeSourceH = sourceBitmap?.height || videoElement.videoHeight || 1080;
+
+      const useW = Math.max(nativeSourceW, finalW);
+      const useH = Math.max(nativeSourceH, finalH);
+
       const canvas = document.createElement('canvas');
-      canvas.width = finalW;
-      canvas.height = finalH;
+      canvas.width = useW;
+      canvas.height = useH;
       const ctx = canvas.getContext('2d', { alpha: false });
       if (!ctx) throw new Error('Could not create canvas context');
 
@@ -494,14 +575,28 @@ export class CameraService {
       ctx.imageSmoothingQuality = 'high';
 
       if (isFront) {
-        // Mirror horizontally so the selfie matches what the user saw on screen!
+        // Mirror horizontally so the selfie matches what the user saw in their viewfinder
         ctx.save();
-        ctx.translate(finalW, 0);
+        ctx.translate(useW, 0);
         ctx.scale(-1, 1);
-        ctx.drawImage(videoElement, 0, 0, finalW, finalH);
+        if (sourceBitmap) {
+          ctx.drawImage(sourceBitmap, 0, 0, useW, useH);
+        } else {
+          ctx.drawImage(videoElement, 0, 0, useW, useH);
+        }
         ctx.restore();
       } else {
-        ctx.drawImage(videoElement, 0, 0, finalW, finalH);
+        if (sourceBitmap) {
+          ctx.drawImage(sourceBitmap, 0, 0, useW, useH);
+        } else {
+          ctx.drawImage(videoElement, 0, 0, useW, useH);
+        }
+      }
+
+      if (sourceBitmap && 'close' in sourceBitmap) {
+        try {
+          sourceBitmap.close();
+        } catch {}
       }
 
       photoBlob = await new Promise<Blob>((resolve, reject) => {
@@ -511,19 +606,25 @@ export class CameraService {
             else reject(new Error('Failed to create photo blob'));
           },
           'image/jpeg',
-          0.96
+          0.97
         );
       });
+      finalW = useW;
+      finalH = useH;
       isFullSensor = true;
     } else if (isFront && photoBlob) {
-      // If still photo came from ImageCapture, mirror it horizontally so selfie isn't inverted!
+      // Mirror the hardware still photo horizontally so selfie isn't flipped inverted
       photoBlob = await this.mirrorBlobHorizontally(photoBlob, finalW, finalH);
     }
 
+    // Calculate ACTUAL Megapixels from real produced dimensions
     const calculatedMp = (finalW * finalH) / 1_000_000;
-    const megapixels = this.resolutionMode === '32mp' ? this.maxSensorMegapixels : Number(calculatedMp.toFixed(1));
+    const megapixels = Number(calculatedMp.toFixed(1));
     const megapixelsFormatted = `${megapixels.toFixed(1)} MP`;
 
+    const cameraUsed = isFront
+      ? `Front Camera (${megapixelsFormatted} Native)`
+      : `Back Camera (${megapixelsFormatted} Native)`;
 
     return {
       blob: photoBlob,
@@ -556,7 +657,7 @@ export class CameraService {
         ctx.scale(-1, 1);
         ctx.drawImage(img, 0, 0, width, height);
         ctx.restore();
-        canvas.toBlob((b) => resolve(b || blob), 'image/jpeg', 0.95);
+        canvas.toBlob((b) => resolve(b || blob), 'image/jpeg', 0.96);
       };
       img.onerror = () => {
         URL.revokeObjectURL(url);
@@ -629,7 +730,6 @@ export class CameraService {
     this.imageCapture = null;
     this.torchEnabled = false;
   }
-
 }
 
 export const cameraService = new CameraService();

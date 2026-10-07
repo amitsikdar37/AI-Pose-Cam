@@ -17,7 +17,20 @@ export interface AIPoseSuggestion {
 export type PosePreset = AIPoseSuggestion;
 
 export type OrientationAngle = 0 | 90 | 180 | 270;
-export type ResolutionMode = '32mp' | '48mp' | '50mp' | '12mp' | '4mp' | 'auto';
+export type ResolutionMode = 'max' | '12mp' | 'auto';
+
+export interface CameraHardwareProfile {
+  facing: 'user' | 'environment';
+  deviceId?: string;
+  label: string;
+  maxWidth: number;
+  maxHeight: number;
+  maxMegapixels: number;
+  hasImageCapture: boolean;
+  supportsTorch: boolean;
+  zoomMin?: number;
+  zoomMax?: number;
+}
 
 export interface CameraSensorInfo {
   maxWidth: number;
@@ -32,6 +45,10 @@ export interface CameraSensorInfo {
   zoomCurrent?: number;
   resolutionMode?: ResolutionMode;
   isQuadBayerBinned?: boolean;
+  hardwareProfiles?: {
+    user?: CameraHardwareProfile;
+    environment?: CameraHardwareProfile;
+  };
 }
 
 export interface CapturedPhoto {

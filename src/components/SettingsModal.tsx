@@ -425,31 +425,56 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
-          {/* 3. Camera Resolution Settings */}
+          {/* 3. Dynamic Camera Hardware & Resolution Settings */}
           <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-white">Full-Sensor Camera Mode</span>
+              <span className="text-sm font-semibold text-white">Detected Camera Hardware</span>
               <span className="text-xs font-mono text-emerald-400 font-bold">
-                {sensorInfo ? `${sensorInfo.maxMegapixels} MP` : 'Auto'}
+                {sensorInfo ? `${sensorInfo.maxMegapixels} MP Native` : 'Detecting...'}
               </span>
             </div>
-            <p className="text-xs text-gray-400 leading-relaxed">
-              Configures hardware sensor capture to native uncompressed resolution (bypasses compressed 1080p stream).
+
+            <div className="space-y-2 pt-1">
+              <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex items-center justify-between text-xs">
+                <span className="text-gray-300 font-medium">📷 Rear Camera Hardware:</span>
+                <span className="font-mono text-emerald-300 font-bold">
+                  {sensorInfo?.hardwareProfiles?.environment
+                    ? `${sensorInfo.hardwareProfiles.environment.maxMegapixels} MP (${sensorInfo.hardwareProfiles.environment.maxWidth}×${sensorInfo.hardwareProfiles.environment.maxHeight})`
+                    : sensorInfo?.facingMode === 'environment'
+                    ? `${sensorInfo.maxMegapixels} MP (${sensorInfo.maxWidth}×${sensorInfo.maxHeight})`
+                    : 'Switch camera to detect (🔄)'}
+                </span>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex items-center justify-between text-xs">
+                <span className="text-gray-300 font-medium">🤳 Front Selfie Hardware:</span>
+                <span className="font-mono text-emerald-300 font-bold">
+                  {sensorInfo?.hardwareProfiles?.user
+                    ? `${sensorInfo.hardwareProfiles.user.maxMegapixels} MP (${sensorInfo.hardwareProfiles.user.maxWidth}×${sensorInfo.hardwareProfiles.user.maxHeight})`
+                    : sensorInfo?.facingMode === 'user'
+                    ? `${sensorInfo.maxMegapixels} MP (${sensorInfo.maxWidth}×${sensorInfo.maxHeight})`
+                    : 'Switch camera to detect (🔄)'}
+                </span>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-400 leading-relaxed pt-1">
+              Every photo is captured dynamically at the maximum native resolution provided by your device's camera hardware.
             </p>
 
             {onSetResolutionMode && (
-              <div className="grid grid-cols-3 gap-2 pt-1">
-                {(['32mp', '48mp', '50mp', '12mp', 'auto'] as ResolutionMode[]).map((mode) => (
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                {(['max', '12mp'] as ResolutionMode[]).map((mode) => (
                   <button
                     key={mode}
                     onClick={() => onSetResolutionMode(mode)}
                     className={`py-2 px-2.5 rounded-xl text-xs font-mono font-bold transition-all border ${
-                      sensorInfo?.resolutionMode === mode
+                      (sensorInfo?.resolutionMode || 'max') === mode
                         ? 'bg-emerald-500 text-black border-emerald-400 shadow-md'
                         : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10'
                     }`}
                   >
-                    {mode.toUpperCase()}
+                    {mode === 'max' ? `MAX (${sensorInfo?.maxMegapixels || ''} MP)` : 'STANDARD (12 MP)'}
                   </button>
                 ))}
               </div>
