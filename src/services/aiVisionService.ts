@@ -15,7 +15,22 @@ export class AIVisionService {
     this.apiKey = this.sanitizeApiKey(
       localStorage.getItem(API_KEY_STORAGE) || envKey
     );
-    this.preferredModel = localStorage.getItem(MODEL_PREF_STORAGE) || 'auto';
+    const storedModel = localStorage.getItem(MODEL_PREF_STORAGE) || 'gemini-3.5-flash';
+    const legacyDiscontinued = [
+      'gemini-1.5-flash',
+      'gemini-1.5-pro',
+      'gemini-2.0-flash',
+      'gemini-2.0-flash-lite',
+      'gemini-2.5-pro',
+      'gemini-3.1-pro-preview',
+      'auto',
+    ];
+    if (legacyDiscontinued.includes(storedModel)) {
+      this.preferredModel = 'gemini-3.5-flash';
+      localStorage.setItem(MODEL_PREF_STORAGE, 'gemini-3.5-flash');
+    } else {
+      this.preferredModel = storedModel;
+    }
   }
 
   public sanitizeApiKey(key: string): string {
@@ -58,7 +73,7 @@ export class AIVisionService {
     if (this.cachedModels.length > 0) return this.cachedModels;
 
     if (!this.hasApiKey()) {
-      return ['gemini-1.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+      return ['gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
     }
 
     try {
@@ -75,13 +90,15 @@ export class AIVisionService {
             .map((m: any) => m.name.replace(/^models\//, ''))
             .filter((name: string) => name.startsWith('gemini'));
 
-          // Priority: 1.5-pro > 2.0-flash > 1.5-flash
+          // Priority ranking: 3.5-flash > 3.8-flash > 3.5-flash-lite > 2.5-flash
           const prioritized = supported.sort((a: string, b: string) => {
             const score = (name: string) => {
-              if (name === 'gemini-1.5-pro' || name.includes('1.5-pro')) return 100;
-              if (name === 'gemini-2.0-flash' || name.includes('2.0-flash')) return 90;
-              if (name === 'gemini-1.5-flash' || name.includes('1.5-flash')) return 80;
-              if (name.includes('pro')) return 70;
+              if (name === 'gemini-3.5-flash') return 120;
+              if (name === 'gemini-3.8-flash') return 115;
+              if (name === 'gemini-3.5-flash-lite') return 110;
+              if (name === 'gemini-2.5-flash') return 90;
+              if (name.includes('3.5-flash')) return 85;
+              if (name.includes('3.8-flash')) return 80;
               if (name.includes('flash')) return 60;
               return 10;
             };
@@ -98,7 +115,7 @@ export class AIVisionService {
       console.warn('Could not auto-discover models:', e);
     }
 
-    return ['gemini-1.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    return ['gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
   }
 
   public async testConnection(key?: string): Promise<{ success: boolean; message: string; models?: string[] }> {

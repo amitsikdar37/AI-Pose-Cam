@@ -163,9 +163,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <label className="text-[11px] font-semibold text-gray-400 block mb-1">Vision & Prompt Model</label>
                 <div className="grid grid-cols-3 gap-1.5">
                   {[
-                    { id: 'gemini-1.5-pro', label: '1.5 Pro', badge: 'Pro Vision' },
-                    { id: 'gemini-2.0-flash', label: '2.0 Flash', badge: 'Next-Gen' },
-                    { id: 'gemini-1.5-flash', label: '1.5 Flash', badge: 'Fast' },
+                    { id: 'gemini-3.5-flash', label: '3.5 Flash', badge: 'Ultra Vision' },
+                    { id: 'gemini-3.8-flash', label: '3.8 Flash', badge: 'Next-Gen' },
+                    { id: 'gemini-3.5-flash-lite', label: '3.5 Lite', badge: 'Fast' },
                   ].map((m) => (
                     <button
                       key={m.id}
