@@ -1,4 +1,5 @@
 import type { AIPoseSuggestion } from '../types/camera';
+import { InferenceClient } from '@huggingface/inference';
 
 const API_KEY_STORAGE = 'gemini_api_key';
 const MODEL_PREF_STORAGE = 'gemini_model_preference';
@@ -208,47 +209,29 @@ export class AIVisionService {
         username = whoami?.name || whoami?.fullname || 'user';
       }
 
-      // 2. Test actual Inference Provider permission with FLUX.1 [schnell]
-      const testResp = await fetch('https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${cleanToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ inputs: 'pose test' }),
+      // 2. Test actual Inference with official client
+      const client = new InferenceClient(cleanToken);
+      await client.textToImage({
+        model: 'black-forest-labs/FLUX.1-schnell',
+        inputs: 'candid photo test',
       });
 
-      if (testResp.status === 403) {
-        const errJson = await testResp.json().catch(() => ({}));
-        const errText = errJson?.error || '';
-        if (errText.includes('Inference Providers') || errText.includes('permissions')) {
-          return {
-            success: false,
-            message: `Hugging Face Permission Issue (HTTP 403): Token for @${username} is missing "Inference Providers" permission. When creating a token on huggingface.co/settings/tokens, select Token type "Write" (or check "Make calls to Inference Providers").`,
-          };
-        }
-        return {
-          success: false,
-          message: `Hugging Face HTTP 403: ${errText || 'Permission Denied'}`,
-        };
-      }
-
-      if (testResp.ok || testResp.status === 503 || testResp.status === 200) {
-        return {
-          success: true,
-          message: `Connected as @${username}! FLUX.1 [schnell] & SDXL are ready to generate 1024px photorealistic poses.`,
-          username,
-        };
-      }
-
       return {
-        success: false,
-        message: `Hugging Face returned status ${testResp.status}. Please check your token.`,
+        success: true,
+        message: `Connected as @${username}! FLUX.1 [schnell] is verified and active for 1024px studio photorealism.`,
+        username,
       };
     } catch (err: any) {
+      const msg = err?.message || '';
+      if (msg.includes('403') || msg.includes('Inference Providers') || msg.includes('permissions')) {
+        return {
+          success: false,
+          message: 'Permission Issue (HTTP 403): Token is missing "Inference Providers" permission. When creating a token on huggingface.co/settings/tokens, select Token type "Write" (or check "Make calls to Inference Providers").',
+        };
+      }
       return {
         success: false,
-        message: `Network error connecting to Hugging Face: ${err?.message || 'Check connection'}`,
+        message: `Hugging Face test error: ${msg || 'Could not verify token'}`,
       };
     }
   }
@@ -275,48 +258,41 @@ export class AIVisionService {
     // 1. Hugging Face Serverless Inference: FLUX.1 [schnell] / SDXL
     if (this.hfToken) {
       const hfModels = [
-        { id: 'black-forest-labs/FLUX.1-schnell', label: 'FLUX.1 [schnell]' },
-        { id: 'stabilityai/stable-diffusion-xl-base-1.0', label: 'SDXL 1.0' },
+        'black-forest-labs/FLUX.1-schnell',
+        'stabilityai/stable-diffusion-xl-base-1.0',
       ];
 
       for (const m of hfModels) {
         try {
-          const endpoint = `https://router.huggingface.co/hf-inference/models/${m.id}`;
-          const resp = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${this.hfToken}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              inputs: `RAW candid color photograph of a stylish fully clothed person, ${clean}, 35mm lens, sharp focus, natural skin texture`,
-            }),
+          const client = new InferenceClient(this.hfToken);
+          const result: any = await client.textToImage({
+            model: m,
+            inputs: `RAW candid color photograph of a stylish fully clothed person, ${clean}, 35mm lens, sharp focus, natural skin texture`,
           });
 
-          if (resp.ok) {
-            const blob = await resp.blob();
-            if (blob && blob.size > 1000) {
-              const dataUrl = await new Promise<string>((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result as string);
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-              });
-              return { imageUrl: dataUrl, engine: m.label };
-            }
-          } else {
-            const errJson = await resp.json().catch(() => ({}));
-            const errText = errJson?.error || `HTTP ${resp.status}`;
-            if (resp.status === 403 && (errText.includes('Inference Providers') || errText.includes('permissions'))) {
-              fallbackReason = 'HF Token missing "Inference Providers" permission (HTTP 403). Create a "Write" token on huggingface.co.';
-            } else if (resp.status === 401) {
-              fallbackReason = 'HF Token is invalid (HTTP 401). Check token in Settings.';
-            } else {
-              fallbackReason = `HF (${m.label}) returned ${resp.status}: ${errText}`;
-            }
+          if (result && typeof result === 'object' && 'size' in result && result.size > 1000) {
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(result as Blob);
+            });
+            const engineLabel = m.includes('FLUX') ? 'FLUX.1 [schnell]' : 'SDXL 1.0';
+            return { imageUrl: dataUrl, engine: engineLabel };
+          } else if (typeof result === 'string' && result.length > 100) {
+            const engineLabel = m.includes('FLUX') ? 'FLUX.1 [schnell]' : 'SDXL 1.0';
+            return { imageUrl: result, engine: engineLabel };
           }
         } catch (hfErr: any) {
-          fallbackReason = `HF network error: ${hfErr?.message || 'Check connection'}`;
+          const errText = hfErr?.message || '';
+          if (errText.includes('403') || errText.includes('Inference Providers')) {
+            fallbackReason = 'HF Token missing "Inference Providers" permission (HTTP 403). Create a "Write" token on huggingface.co.';
+          } else if (errText.includes('401')) {
+            fallbackReason = 'HF Token is invalid (HTTP 401). Check token in Settings.';
+          } else {
+            fallbackReason = `HF (${m}) error: ${errText}`;
+          }
+          console.warn(`Hugging Face inference error (${m}):`, hfErr);
         }
       }
     }
