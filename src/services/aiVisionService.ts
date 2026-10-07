@@ -189,16 +189,21 @@ export class AIVisionService {
       }
     }
 
-    // 2. High-speed FLUX.1 fallback (State-of-the-art open weights, photorealistic human anatomy)
-    const cleanPrompt = prompt
+    // 2. Professional Photographic Reference Synthesis
+    const clean = prompt
       .replace(/[\n\r]+/g, ' ')
       .replace(/["']/g, '')
-      .trim()
-      .slice(0, 350);
+      .trim();
+
+    // Ensure complete modern clothing and crisp anatomical clarity to prevent distorted limbs
+    const qualityPrefix = 'Professional editorial photography of a fully clothed stylish person wearing modern casual apparel,';
+    const qualitySuffix = 'clear posture, sharp focus on facial features and hands, natural ambient lighting, 50mm portrait photography, realistic anatomy';
+
+    const finalPrompt = `${qualityPrefix} ${clean}, ${qualitySuffix}`.slice(0, 360);
 
     const seed = Math.floor(Math.random() * 9999999) + 1;
-    const encoded = encodeURIComponent(cleanPrompt);
-    return `https://image.pollinations.ai/prompt/${encoded}?nologo=true&seed=${seed}&model=flux`;
+    const encoded = encodeURIComponent(finalPrompt);
+    return `https://image.pollinations.ai/prompt/${encoded}?nologo=true&seed=${seed}`;
   }
 
   /**
@@ -259,7 +264,10 @@ ${exclusionNotice}
    - "vibe": Aesthetic mood (e.g. "Casual Editorial", "Warm Living Room", "Effortless Candid").
    - "directionTip": 2-3 clear, friendly, actionable sentences instructing the person exactly how to position their body, limbs, and face with the detected object.
    - "imagePrompt": A vivid, photorealistic prompt for a text-to-image AI depicting a stylish person striking this exact pose with the detected scene objects.
-     Must be formatted as: "A photorealistic photograph of a stylish person [exact pose], interacting with [detected objects], natural flattering lighting, 50mm portrait lens, 8k, cinematic, realistic human anatomy".
+     CRITICAL PROMPT RULES:
+     * MUST describe a fully clothed person in stylish modern casual apparel (e.g. "wearing a knit sweater and jeans" or "casual denim jacket and dark trousers"). NEVER describe bare skin, lingerie, or implied nudity.
+     * MUST specify medium-full shot clearly showing both arms, legs, and posture angle so the pose is easy to understand.
+     * Format as: "A photorealistic photograph of a stylish person wearing [outfit] [exact pose], interacting with [detected objects], natural flattering lighting, 50mm portrait lens, 8k, realistic human anatomy".
 
 Return ONLY valid JSON matching this exact structure:
 {
