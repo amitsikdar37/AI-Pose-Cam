@@ -16,10 +16,38 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({
 }) => {
   const [isMinimized, setIsMinimized] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(() => {
+    return Boolean(currentPose?.referenceImageUrl?.startsWith('data:'));
+  });
+  const imgRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
+    const url = currentPose?.referenceImageUrl;
+    if (!url) {
+      setImageLoaded(false);
+      return;
+    }
+
+    // Base64 Data URLs (from Hugging Face FLUX.1) are in-memory and immediately ready
+    if (url.startsWith('data:')) {
+      setImageLoaded(true);
+      return;
+    }
+
+    // If image is already cached or completed by browser
+    if (imgRef.current && (imgRef.current.complete || imgRef.current.naturalWidth > 0)) {
+      setImageLoaded(true);
+      return;
+    }
+
     setImageLoaded(false);
+
+    // Safety timeout: Ensure card never gets permanently stuck on "Loading Photo..."
+    const timer = setTimeout(() => {
+      setImageLoaded(true);
+    }, 1200);
+
+    return () => clearTimeout(timer);
   }, [currentPose?.referenceImageUrl]);
 
   // Free-floating draggable coordinates
@@ -166,19 +194,21 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({
           {/* Reference Image or Fallback */}
           {hasPhoto ? (
             <>
-              {!imageLoaded && !isAnalyzing && (
-                <div className="absolute inset-0 z-20 bg-black/60 backdrop-blur-xs flex flex-col items-center justify-center p-2 text-center">
+              {!imageLoaded && !isAnalyzing && !currentPose.referenceImageUrl.startsWith('data:') && (
+                <div className="absolute inset-0 z-20 bg-black/60 backdrop-blur-xs flex flex-col items-center justify-center p-2 text-center pointer-events-none">
                   <RefreshCw className="w-5 h-5 text-emerald-400 animate-spin mb-1" />
                   <span className="text-[9px] font-medium text-gray-300">Loading Photo...</span>
                 </div>
               )}
               <img
+                ref={imgRef}
                 src={currentPose.referenceImageUrl}
                 alt={currentPose.title}
                 draggable={false}
                 onLoad={() => setImageLoaded(true)}
-                className={`w-full h-full object-cover pointer-events-none select-none transition-opacity duration-300 ${
-                  imageLoaded ? 'opacity-100' : 'opacity-0'
+                onError={() => setImageLoaded(true)}
+                className={`w-full h-full object-cover pointer-events-none select-none transition-opacity duration-200 ${
+                  imageLoaded || currentPose.referenceImageUrl.startsWith('data:') ? 'opacity-100' : 'opacity-0'
                 }`}
               />
             </>
