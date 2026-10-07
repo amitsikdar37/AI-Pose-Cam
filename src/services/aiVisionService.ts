@@ -265,9 +265,14 @@ export class AIVisionService {
       for (const m of hfModels) {
         try {
           const client = new InferenceClient(this.hfToken);
+          const isSelfiePrompt = clean.toLowerCase().includes('selfie') || clean.toLowerCase().includes('head and shoulders');
+          const hfInputs = isSelfiePrompt
+            ? (clean.startsWith('RAW') || clean.startsWith('A photorealistic') ? clean : `RAW close-up selfie portrait, ${clean}`)
+            : (clean.startsWith('RAW') || clean.startsWith('A photorealistic') ? clean : `RAW candid photograph of a stylish fully clothed person, ${clean}, 35mm lens, sharp focus, natural skin texture`);
+
           const result: any = await client.textToImage({
             model: m,
-            inputs: `RAW candid color photograph of a stylish fully clothed person, ${clean}, 35mm lens, sharp focus, natural skin texture`,
+            inputs: hfInputs,
           });
 
           if (result && typeof result === 'object' && 'size' in result && result.size > 1000) {
@@ -339,8 +344,13 @@ export class AIVisionService {
     }
 
     // 4. Zero-Key Fast Fallback with anti-doll / realistic clothing conditioning
-    const qualityPrefix = 'RAW color photograph, candid 35mm photo of stylish fully clothed person,';
-    const qualitySuffix = 'real human skin texture, natural pose, sharp focus, ambient lighting';
+    const isSelfie = clean.toLowerCase().includes('selfie') || clean.toLowerCase().includes('head and shoulders');
+    const qualityPrefix = isSelfie
+      ? 'RAW color selfie portrait photograph, candid close-up of stylish fully clothed person,'
+      : 'RAW color photograph, candid 35mm photo of stylish fully clothed person,';
+    const qualitySuffix = isSelfie
+      ? 'natural flattering lighting on face, sharp focus on eyes, realistic human skin texture'
+      : 'real human skin texture, natural pose, sharp focus, ambient lighting';
     const finalPrompt = `${qualityPrefix} ${clean}, ${qualitySuffix}`.slice(0, 360);
 
     const seed = Math.floor(Math.random() * 9999999) + 1;
@@ -357,10 +367,10 @@ export class AIVisionService {
   /**
    * Core Vision Pipeline:
    * 1. Sends the live camera frame to Google Gemini Multimodal Vision API.
-   * 2. Gemini inspects the actual image to identify real physical objects (chairs, tables, walls, props).
-   * 3. Based purely on the scene, Gemini devises the best pose interacting with the primary object.
-   * 4. Gemini crafts a tailored photorealistic text-to-image prompt.
-   * 5. The prompt is passed to the image generator to render the reference photo.
+   * 2. Gemini inspects camera mode (Selfie vs Rear) and the live snapshot framing.
+   * 3. If Selfie: crafts an upper-body / head-and-shoulders selfie pose with flattering angles & gestures.
+   * 4. If Rear camera: crafts an environmental medium or full-body pose interacting with scene objects.
+   * 5. Prompts the image generation model with matching shot framing.
    */
   public async analyzeSceneAndGeneratePose(
     base64Image: string,
@@ -378,8 +388,8 @@ export class AIVisionService {
 
     const isFront = options?.facingMode === 'user';
     const cameraContext = isFront
-      ? 'Front-facing selfie camera (close-up to upper-body portrait distance)'
-      : 'Rear main camera (subject in room / environment, portrait to full-body)';
+      ? 'FRONT-FACING SELFIE CAMERA: The user is holding the phone in hand at arm\'s length taking a selfie portrait. Only head, shoulders, and chest are visible.'
+      : 'REAR MAIN CAMERA: The phone is pointing outward at the subject/room (medium to full-body distance).';
 
     const exclusionNotice =
       options?.previousTitles && options.previousTitles.length > 0
@@ -388,42 +398,46 @@ export class AIVisionService {
 
     const prompt = `You are a world-class professional photographer and creative pose director.
 Inspect this live camera viewfinder snapshot very carefully.
-CAMERA CONTEXT: ${cameraContext}.
 
-1. SCENE OBJECT IDENTIFICATION:
-   - Identify setting, lighting, and specifically what physical objects, furniture, or architecture are visible in this frame (e.g. chair, armchair, folding chair, couch, table, desk, wall, door/doorway, steps/stairs, railing/balcony, window, bed, floor).
-   - Look closely at what the subject can physically interact with.
+CAMERA HARDWARE CONTEXT:
+${cameraContext}
 
-2. DYNAMIC POSE RECOMMENDATION:
-   - Based PURELY on the real objects visible in this snapshot, recommend the most natural, stylish, and flattering photography pose that directly uses or interacts with the primary object.
-   - For example:
-     * If a chair, couch, bench, or seat is visible in the frame: Recommend a pose seated on or casually leaning against that chair (e.g. sitting comfortably, legs crossed or relaxed, forearms or elbows resting on knees/lap/armrest, relaxed torso angle).
-     * If a wall, pillar, or doorway is prominent: Recommend a relaxed wall-leaning pose.
-     * If a table or desk is prominent: Recommend sitting or leaning forward over the table.
-     * If steps or stairs are visible: Recommend a seated step pose.
-     * If open space: Recommend a relaxed standing or walking candid pose.
-     * If front selfie camera: Recommend a close-up portrait with flattering head tilt and natural hand gestures.
+STEP 1: SHOT FRAMING & USER INTENTION RECOGNITION (CRITICAL FIRST STEP):
+Determine whether the user is taking a SELFIE (front-facing hand-held portrait) or a REAR-CAMERA ENVIRONMENT SHOT:
 
+- SCENARIO A: USER IS TAKING A SELFIE (Front camera is active OR user's face and upper torso dominate the viewfinder at close range):
+  * The user is holding their smartphone in hand at arm's length!
+  * ABSOLUTE PROHIBITION: DO NOT recommend full-body poses! NEVER tell the user to show their legs, feet, or sit far back in a distant chair. The user physically CANNOT take a full-body photo while holding a selfie camera!
+  * Framing MUST BE: Head-and-shoulders, bust, or close-up self-portrait.
+  * What to direct for Selfies:
+    - Head & jawline angle: 3/4 turn to the primary light source, chin slightly lowered or angled up to sharpen jawline, eyes making direct confident or relaxed contact with the lens.
+    - Shoulder rotation: Angling one shoulder slightly forward toward the camera to create depth (avoiding flat passport-style shoulders).
+    - Natural hand gestures in frame: Hand gently resting on jawline, fingers touching chin or hair, adjusting glasses or collar, resting chin on palm/knuckles, or casual hand holding the phone at high/low 45-degree angle.
+    - Subtle background interaction: If background furniture (chair headrest, car headrest, bed pillow, wall, window) is visible behind the user, instruct them to lean their head or upper back lightly against it as a background accent, but KEEP the shot strictly head-and-shoulders!
+  * "imagePrompt" for Selfie:
+    MUST be: "A photorealistic candid selfie photograph of a stylish fully clothed person, close-up head-and-shoulders portrait framing, smartphone camera angle held at arm's length, [exact head tilt and shoulder angle], [hand touching chin/hair if specified], [subtle background setting hints], natural flattering lighting on face, sharp focus on eyes and facial features, 8k, realistic human skin texture".
+
+- SCENARIO B: REAR CAMERA / ENVIRONMENT SHOT (Subject at medium or full-body distance):
+  * The phone is pointing outward at a person or space from 1.5 to 4 meters away.
+  * Recommend a natural pose interacting with the primary physical object in the frame (e.g. seated in chair/couch with natural leg cross, leaning against a wall/railing, sitting on steps, standing with weight shifted).
+  * "imagePrompt" for Rear Camera:
+    MUST be: "A photorealistic candid photograph of a stylish fully clothed person, [medium or full-body framing], [outfit], [exact pose interacting with detected objects], 50mm portrait lens, natural ambient lighting, 8k, realistic human anatomy".
+
+STEP 2: SCENE OBJECT IDENTIFICATION:
+- Identify 1 to 4 dominant physical objects, furniture, or architectural elements visible in the frame (e.g. chair, wall, window, desk, pillow, shelf).
+
+STEP 3: POSE RECOMMENDATION:
+- Devise a creative, stylish pose matching the user's camera mode (Selfie vs Rear environment).
 ${exclusionNotice}
 
-3. OUTPUT REQUIREMENTS:
-   - "sceneObjects": Array of 1 to 4 dominant physical objects detected in the snapshot.
-   - "title": Short catchy title for the pose (e.g. "The Relaxed Chair Sit", "The Casual Desk Lean", "The Architectural Wall Slant").
-   - "vibe": Aesthetic mood (e.g. "Casual Editorial", "Warm Living Room", "Effortless Candid").
-   - "directionTip": 2-3 clear, friendly, actionable sentences instructing the person exactly how to position their body, limbs, and face with the detected object.
-   - "imagePrompt": A vivid, photorealistic prompt for a text-to-image AI depicting a stylish person striking this exact pose with the detected scene objects.
-     CRITICAL PROMPT RULES:
-     * MUST describe a fully clothed person in stylish modern casual apparel (e.g. "wearing a knit sweater and jeans" or "casual denim jacket and dark trousers"). NEVER describe bare skin, lingerie, or implied nudity.
-     * MUST specify medium-full shot clearly showing both arms, legs, and posture angle so the pose is easy to understand.
-     * Format as: "A photorealistic photograph of a stylish person wearing [outfit] [exact pose], interacting with [detected objects], natural flattering lighting, 50mm portrait lens, 8k, realistic human anatomy".
-
+STEP 4: OUTPUT JSON FORMAT:
 Return ONLY valid JSON matching this exact structure:
 {
   "sceneObjects": ["Object 1", "Object 2"],
-  "title": "Catchy Pose Title",
-  "vibe": "Aesthetic Vibe",
-  "directionTip": "Step-by-step instructions...",
-  "imagePrompt": "Photorealistic prompt..."
+  "title": "Short Catchy Pose Title (e.g. 'The Angled Jawline Glance', 'The Casual Headrest Lean', 'The Studio Wall Slant')",
+  "vibe": "Aesthetic Vibe (e.g. 'Candid Golden Hour', 'Clean Minimalist Selfie', 'Effortless Streetwear')",
+  "directionTip": "2-3 clear, friendly, actionable sentences instructing the user how to position their head, shoulders, face, and hands according to their camera framing.",
+  "imagePrompt": "Photorealistic prompt formatted strictly according to SCENARIO A (for selfie) or SCENARIO B (for rear camera)."
 }`;
 
     const discovered = await this.discoverAvailableModels();

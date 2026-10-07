@@ -124,7 +124,7 @@ export const App: React.FC = () => {
 
       // Capture frame for multimodal LLM inspection
       const frame = cameraService.captureAnalysisFrame(videoRef.current);
-      const isFront = sensorInfo?.facingMode === 'user';
+      const isFront = sensorInfo?.facingMode === 'user' || cameraService.getFacingMode() === 'user';
 
       const newPose = await aiVisionService.analyzeSceneAndGeneratePose(
         frame.base64,
