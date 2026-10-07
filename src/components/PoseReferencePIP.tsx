@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Maximize2, Sparkles, Image as ImageIcon, GripHorizontal, Move, RefreshCw, Layers } from 'lucide-react';
+import { X, Maximize2, Sparkles, Image as ImageIcon, GripHorizontal, Move, RefreshCw, Layers, AlertTriangle } from 'lucide-react';
 import type { AIPoseSuggestion } from '../types/camera';
 
 interface PoseReferencePIPProps {
@@ -233,9 +233,18 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({
 
           {/* Bottom Title & Object Badge Banner */}
           <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/95 via-black/80 to-transparent p-1.5 pt-4 pointer-events-none select-none">
-            <span className="text-[10px] font-bold text-emerald-300 block truncate">
-              {currentPose.title}
-            </span>
+            <div className="flex items-center justify-between gap-1 mb-0.5">
+              <span className="text-[10px] font-bold text-emerald-300 truncate">
+                {currentPose.title}
+              </span>
+              <span className={`text-[7px] px-1 py-0.5 rounded font-mono font-bold flex-shrink-0 uppercase border ${
+                currentPose.imageEngine?.includes('FLUX')
+                  ? 'bg-purple-500/30 text-purple-200 border-purple-400/50'
+                  : 'bg-white/10 text-gray-300 border-white/10'
+              }`}>
+                {currentPose.imageEngine?.includes('FLUX') ? 'FLUX.1' : 'Free AI'}
+              </span>
+            </div>
             {currentPose.sceneObjects && currentPose.sceneObjects.length > 0 && (
               <span className="text-[8px] text-gray-300 truncate block">
                 🎯 {currentPose.sceneObjects.slice(0, 2).join(', ')}
@@ -323,10 +332,23 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({
               <p className="text-xs text-gray-200 leading-relaxed">{currentPose.directionTip}</p>
             </div>
 
-            {/* Free Mode Quality Notice */}
-            {currentPose.imageEngine?.includes('Free AI') && (
+            {/* Engine & Fallback Notification Banner */}
+            {currentPose.fallbackReason ? (
+              <div className="px-3.5 py-2.5 bg-amber-950/50 border-t border-amber-500/40 text-[11px] text-amber-200 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <span className="font-bold text-amber-300 block">Hugging Face Fallback Triggered:</span>
+                  <span className="text-gray-300 leading-tight block">{currentPose.fallbackReason}</span>
+                </div>
+              </div>
+            ) : currentPose.imageEngine?.includes('FLUX') ? (
+              <div className="px-4 py-2 bg-emerald-950/30 border-t border-emerald-500/20 flex items-center justify-between text-[10px]">
+                <span className="text-emerald-300 font-medium">✨ Generated with FLUX.1 [schnell] (12B Studio)</span>
+                <span className="text-[10px] text-emerald-400 font-mono">1024px RAW</span>
+              </div>
+            ) : (
               <div className="px-4 py-2 bg-purple-950/30 border-t border-purple-500/20 flex items-center justify-between text-[10px]">
-                <span className="text-purple-300 font-medium">Want 1024px studio photorealism?</span>
+                <span className="text-purple-300 font-medium">Model: Free AI (Pollinations SANA)</span>
                 <span className="text-emerald-400 font-semibold">Settings ⚙️ → Free HF Token</span>
               </div>
             )}

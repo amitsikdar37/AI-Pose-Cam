@@ -35,6 +35,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string; models?: string[] } | null>(null);
+  const [testingHf, setTestingHf] = useState(false);
+  const [hfTestResult, setHfTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const handleTestHfToken = async () => {
+    setTestingHf(true);
+    setHfTestResult(null);
+    const result = await aiVisionService.testHfToken(hfTokenInput.trim());
+    setHfTestResult(result);
+    setTestingHf(false);
+  };
 
   const handleSaveApiKey = () => {
     const cleaned = aiVisionService.sanitizeApiKey(apiKeyInput);
@@ -324,6 +334,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
 
+              <div className="p-2 rounded-xl bg-purple-950/30 border border-purple-500/20 text-[10px] text-purple-200 leading-relaxed">
+                <span className="font-bold text-purple-300 block mb-0.5">⚠️ Required Token Permission:</span>
+                When creating your token on Hugging Face, select Token type <strong className="text-white">"Write"</strong> (or enable <strong className="text-white">"Make calls to Inference Providers"</strong>). A repo read-only token cannot generate images.
+              </div>
+
               <div className="pt-2 border-t border-white/5 space-y-1">
                 <div className="flex items-center justify-between">
                   <label className="text-[11px] font-semibold text-gray-400">
@@ -355,6 +370,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       handleClearHfToken();
                       aiVisionService.setPollinationsKey('');
                       setPollinationsKeyInput('');
+                      setHfTestResult(null);
                     }}
                     className="text-[10px] text-red-400 hover:text-red-300 transition-colors"
                   >
@@ -365,13 +381,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     Without key: runs fast zero-key fallback
                   </span>
                 )}
-                <button
-                  onClick={handleSaveApiKey}
-                  className="px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs transition-colors shadow-sm active:scale-95"
-                >
-                  Save Quality Settings
-                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleTestHfToken}
+                    disabled={testingHf || !hfTokenInput.trim()}
+                    className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition-colors disabled:opacity-40 flex items-center gap-1"
+                  >
+                    {testingHf ? (
+                      <RefreshCw className="w-3 h-3 animate-spin text-purple-400" />
+                    ) : (
+                      <span>Test Token</span>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={handleSaveApiKey}
+                    className="px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs transition-colors shadow-sm active:scale-95"
+                  >
+                    Save Quality
+                  </button>
+                </div>
               </div>
+
+              {/* HF Test Result Box */}
+              {hfTestResult && (
+                <div
+                  className={`mt-2 p-2.5 rounded-xl border text-xs flex items-start gap-2 ${
+                    hfTestResult.success
+                      ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                      : 'bg-red-950/40 border-red-500/40 text-red-300'
+                  }`}
+                >
+                  {hfTestResult.success ? (
+                    <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                  )}
+                  <span className="leading-snug">{hfTestResult.message}</span>
+                </div>
+              )}
             </div>
           </div>
 

@@ -10,6 +10,7 @@ export interface AIPoseSuggestion {
   cameraFacing?: 'user' | 'environment';
   generationEngine?: string;
   imageEngine?: string;
+  fallbackReason?: string;
 }
 
 // PosePreset alias for compatibility

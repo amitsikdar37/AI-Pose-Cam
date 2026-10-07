@@ -184,6 +184,76 @@ export class AIVisionService {
   }
 
   /**
+   * Tests Hugging Face token against the API to verify inference permissions.
+   */
+  public async testHfToken(token?: string): Promise<{ success: boolean; message: string; username?: string }> {
+    const cleanToken = (token || this.hfToken).replace(/["';\s\\]/g, '').trim();
+    if (!cleanToken) {
+      return { success: false, message: 'Please enter a Hugging Face token first.' };
+    }
+
+    try {
+      // 1. Check user profile & authentication
+      const whoamiResp = await fetch('https://huggingface.co/api/whoami-v2', {
+        headers: { Authorization: `Bearer ${cleanToken}` },
+      });
+
+      if (whoamiResp.status === 401) {
+        return { success: false, message: 'Invalid token (HTTP 401). Please check the token string on huggingface.co.' };
+      }
+
+      let username = 'user';
+      if (whoamiResp.ok) {
+        const whoami = await whoamiResp.json().catch(() => ({}));
+        username = whoami?.name || whoami?.fullname || 'user';
+      }
+
+      // 2. Test actual Inference Provider permission with FLUX.1 [schnell]
+      const testResp = await fetch('https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${cleanToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ inputs: 'pose test' }),
+      });
+
+      if (testResp.status === 403) {
+        const errJson = await testResp.json().catch(() => ({}));
+        const errText = errJson?.error || '';
+        if (errText.includes('Inference Providers') || errText.includes('permissions')) {
+          return {
+            success: false,
+            message: `Hugging Face Permission Issue (HTTP 403): Token for @${username} is missing "Inference Providers" permission. When creating a token on huggingface.co/settings/tokens, select Token type "Write" (or check "Make calls to Inference Providers").`,
+          };
+        }
+        return {
+          success: false,
+          message: `Hugging Face HTTP 403: ${errText || 'Permission Denied'}`,
+        };
+      }
+
+      if (testResp.ok || testResp.status === 503 || testResp.status === 200) {
+        return {
+          success: true,
+          message: `Connected as @${username}! FLUX.1 [schnell] & SDXL are ready to generate 1024px photorealistic poses.`,
+          username,
+        };
+      }
+
+      return {
+        success: false,
+        message: `Hugging Face returned status ${testResp.status}. Please check your token.`,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: `Network error connecting to Hugging Face: ${err?.message || 'Check connection'}`,
+      };
+    }
+  }
+
+  /**
    * Generates a photorealistic reference image from an image generation prompt.
    * Priority:
    * 1. Hugging Face Serverless FLUX.1 [schnell] / SDXL (if HF Token is provided) -> 12B parameter studio quality!
@@ -194,11 +264,13 @@ export class AIVisionService {
   public async generateImageFromPrompt(
     prompt: string,
     aspectRatio: '3:4' | '1:1' = '1:1'
-  ): Promise<{ imageUrl: string; engine: string }> {
+  ): Promise<{ imageUrl: string; engine: string; fallbackReason?: string }> {
     const clean = prompt
       .replace(/[\n\r]+/g, ' ')
       .replace(/["']/g, '')
       .trim();
+
+    let fallbackReason: string | undefined;
 
     // 1. Hugging Face Serverless Inference: FLUX.1 [schnell] / SDXL
     if (this.hfToken) {
@@ -232,9 +304,19 @@ export class AIVisionService {
               });
               return { imageUrl: dataUrl, engine: m.label };
             }
+          } else {
+            const errJson = await resp.json().catch(() => ({}));
+            const errText = errJson?.error || `HTTP ${resp.status}`;
+            if (resp.status === 403 && (errText.includes('Inference Providers') || errText.includes('permissions'))) {
+              fallbackReason = 'HF Token missing "Inference Providers" permission (HTTP 403). Create a "Write" token on huggingface.co.';
+            } else if (resp.status === 401) {
+              fallbackReason = 'HF Token is invalid (HTTP 401). Check token in Settings.';
+            } else {
+              fallbackReason = `HF (${m.label}) returned ${resp.status}: ${errText}`;
+            }
           }
-        } catch (hfErr) {
-          console.warn(`Hugging Face inference error (${m.id}):`, hfErr);
+        } catch (hfErr: any) {
+          fallbackReason = `HF network error: ${hfErr?.message || 'Check connection'}`;
         }
       }
     }
@@ -289,7 +371,11 @@ export class AIVisionService {
     const encoded = encodeURIComponent(finalPrompt);
     const fallbackUrl = `https://image.pollinations.ai/prompt/${encoded}?enhance=false&nologo=true&seed=${seed}`;
 
-    return { imageUrl: fallbackUrl, engine: 'Free AI (Fast)' };
+    return {
+      imageUrl: fallbackUrl,
+      engine: 'Free AI (Pollinations SANA)',
+      fallbackReason,
+    };
   }
 
   /**
@@ -441,7 +527,7 @@ Return ONLY valid JSON matching this exact structure:
     }
 
     // Step 2: Generate the Reference Photo from the Vision Model's Prompt!
-    const { imageUrl, engine } = await this.generateImageFromPrompt(
+    const { imageUrl, engine, fallbackReason } = await this.generateImageFromPrompt(
       parsedResult.imagePrompt,
       '1:1'
     );
@@ -455,6 +541,7 @@ Return ONLY valid JSON matching this exact structure:
       imagePrompt: parsedResult.imagePrompt,
       referenceImageUrl: imageUrl,
       imageEngine: engine,
+      fallbackReason,
       createdAt: Date.now(),
       cameraFacing: options?.facingMode || 'environment',
       generationEngine: 'gemini_vision',
