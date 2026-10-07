@@ -2,34 +2,29 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import confetti from 'canvas-confetti';
 import { AlertCircle, RefreshCw, CheckCircle, AlertTriangle } from 'lucide-react';
 import type {
-  AlignmentResult,
   CameraSensorInfo,
   CapturedPhoto,
-  PoseLandmarks,
-  PosePreset,
+  AIPoseSuggestion,
   ResolutionMode,
 } from './types/camera';
 
-import { DEFAULT_POSES } from './data/defaultPoses';
+import { WELCOME_POSE } from './data/defaultPoses';
 import { cameraService } from './services/cameraService';
 import { poseDetectionService } from './services/poseDetectionService';
 import { aiVisionService } from './services/aiVisionService';
-import { playShutterSound, playAlignedChime, triggerHaptic, playCountdownBeep } from './utils/audioHaptics';
+import { playShutterSound, triggerHaptic, playCountdownBeep } from './utils/audioHaptics';
 import { createStampedPhoto } from './utils/watermark';
-import { SkeletalOverlay } from './components/SkeletalOverlay';
 import { CameraHUD } from './components/CameraHUD';
 import { PhotoPreviewModal } from './components/PhotoPreviewModal';
-import { PoseSelectorModal } from './components/PoseSelectorModal';
 import { SettingsModal } from './components/SettingsModal';
 import { PoseReferencePIP } from './components/PoseReferencePIP';
 import { useDeviceOrientation } from './hooks/useDeviceOrientation';
-import { getRotatedLandmarks } from './utils/orientationUtils';
 
 export const App: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
 
-  // Automatic Device Orientation Tracking (Portrait 0°, Landscape Left 90°, Landscape Right 270°)
+  // Automatic Device Orientation Tracking
   const { angle: orientationAngle, cycleOrientation } = useDeviceOrientation();
 
   // Camera & Sensor State
@@ -41,29 +36,15 @@ export const App: React.FC = () => {
   const [shutterFlashing, setShutterFlashing] = useState(false);
   const [tapFocusCoord, setTapFocusCoord] = useState<{ x: number; y: number } | null>(null);
 
-  // Pose & AI Director State
-  const [currentPose, setCurrentPose] = useState<PosePreset>(DEFAULT_POSES[0]);
-  const [liveLandmarks, setLiveLandmarks] = useState<PoseLandmarks | null>(null);
-  const [alignment, setAlignment] = useState<AlignmentResult>({
-    score: 0,
-    isAligned: false,
-    jointErrors: {},
-    primaryFeedback: 'Initializing AI Director...',
-    alignedJointsCount: 0,
-    totalJointsCount: 0,
-  });
+  // Dynamic AI Director & Pose Generation State
+  const [currentPose, setCurrentPose] = useState<AIPoseSuggestion>(WELCOME_POSE);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiNotice, setAiNotice] = useState<{ type: 'success' | 'warn'; text: string } | null>(null);
 
   // Settings & Modals State
-  const [showPoseSelector, setShowPoseSelector] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showGrid, setShowGrid] = useState(false);
-  const [autoCapture, setAutoCapture] = useState(false);
-  const [alignmentSensitivity, setAlignmentSensitivity] = useState(75);
-  const [guideOpacity, setGuideOpacity] = useState(0.90);
-  const [guideMode, setGuideMode] = useState<'silhouette' | 'hybrid' | 'skeletal'>('silhouette');
   const [viewfinderMode, setViewfinderMode] = useState<'wide' | 'cover'>('wide');
 
   // Advanced Smartphone Selfie Shutter Modes
@@ -78,15 +59,11 @@ export const App: React.FC = () => {
   const lastPalmTriggerTimeRef = useRef<number>(0);
   const palmHoldStartRef = useRef<number | null>(null);
 
-
   // Captured Photos History
   const [capturedPhotos, setCapturedPhotos] = useState<CapturedPhoto[]>([]);
   const lastPhoto = capturedPhotos[0] || null;
 
-  // Track alignment chime trigger (to not spam audio while holding pose)
-  const hasChimedRef = useRef(false);
-
-  // 1. Initialize Camera and Pose Detection
+  // 1. Initialize Camera
   const initApp = useCallback(async () => {
     if (!videoRef.current) return;
     setCameraLoading(true);
@@ -97,9 +74,9 @@ export const App: React.FC = () => {
       setSensorInfo(info);
       setCameraLoading(false);
 
-      // Initialize MediaPipe PoseLandmarker in the background
+      // Initialize background gesture detector for optional palm shutter
       poseDetectionService.initialize().catch((err) => {
-        console.warn('Pose model background init error:', err);
+        console.warn('Gesture init warning:', err);
       });
     } catch (err: any) {
       console.error('Camera startup error:', err);
@@ -118,112 +95,69 @@ export const App: React.FC = () => {
     };
   }, [initApp]);
 
-  // 2. Perform Scene Analysis using Gemini Vision
+  // 2. Perform Scene Analysis & Text-to-Image Pose Generation
   const handlePerformAnalysis = useCallback(async () => {
     if (!videoRef.current || isAnalyzing) return;
     setIsAnalyzing(true);
     setAiNotice(null);
-    triggerHaptic('light');
+    triggerHaptic('medium');
 
     try {
-      // Capture single normal-quality frame for LLM analysis
+      // Capture frame for multimodal LLM inspection
       const frame = cameraService.captureAnalysisFrame(videoRef.current);
-      const result = await aiVisionService.analyzeSceneAndRecommendPose(
+      const isFront = sensorInfo?.facingMode === 'user';
+
+      const newPose = await aiVisionService.analyzeSceneAndGeneratePose(
         frame.base64,
-        frame.mimeType
+        frame.mimeType,
+        {
+          facingMode: isFront ? 'user' : 'environment',
+          previousTitle: currentPose?.title,
+        }
       );
 
-      setCurrentPose(result.preset);
+      setCurrentPose(newPose);
+      triggerHaptic('heavy');
 
-      if (result.isAIGenerated) {
-        triggerHaptic('double');
-        setAiNotice({
-          type: 'success',
-          text: `✨ Bespoke AI Pose: "${result.preset.title}" generated for this scene!`,
-        });
-      } else {
-        setAiNotice({
-          type: 'warn',
-          text: result.errorNotice || 'Switched pose preset.',
-        });
-      }
+      const objectsMentioned =
+        newPose.sceneObjects.length > 0
+          ? ` utilizing ${newPose.sceneObjects.slice(0, 2).join(' & ')}`
+          : '';
 
-      // Auto dismiss notice after 4.5s
+      setAiNotice({
+        type: 'success',
+        text: `✨ Generated "${newPose.title}"${objectsMentioned}! Check reference card.`,
+      });
+
+      // Confetti burst for creative inspiration
+      try {
+        confetti({
+          particleCount: 28,
+          spread: 60,
+          origin: { y: 0.15 },
+          colors: ['#10b981', '#34d399', '#f59e0b'],
+        });
+      } catch {}
+
       setTimeout(() => {
         setAiNotice(null);
-      }, 4500);
+      }, 5000);
     } catch (e: any) {
       console.error('Scene analysis failed:', e);
       setAiNotice({
         type: 'warn',
-        text: `Error: ${e?.message || 'Could not analyze scene'}. Using studio pose.`,
+        text: `Notice: ${e?.message || 'Could not generate pose'}. Try again.`,
       });
       setTimeout(() => setAiNotice(null), 4500);
     } finally {
       setIsAnalyzing(false);
     }
-  }, [isAnalyzing]);
-
-  // 3. Pose Detection & Alignment Loop
-  useEffect(() => {
-    let lastTime = 0;
-
-    const processFrame = (now: number) => {
-      const video = videoRef.current;
-      if (video && video.readyState >= 2) {
-        // Run pose detection at ~25-30 FPS for smooth performance
-        if (now - lastTime >= 33) {
-          lastTime = now;
-          const detected = poseDetectionService.detectPose(video, now);
-          setLiveLandmarks(detected);
-
-          const isFrontCamera = sensorInfo?.facingMode === 'user';
-          const isLandscapeViewport = window.innerWidth > window.innerHeight;
-          const effectiveAngle = isLandscapeViewport ? 0 : orientationAngle;
-
-          const effectiveTargetLandmarks = currentPose
-            ? (effectiveAngle !== 0
-                ? getRotatedLandmarks(currentPose.landmarks, effectiveAngle, isFrontCamera)
-                : currentPose.landmarks)
-            : null;
-
-          const alignResult = poseDetectionService.calculateAlignment(
-            detected,
-            effectiveTargetLandmarks,
-            alignmentSensitivity,
-            isFrontCamera
-          );
-
-          setAlignment(alignResult);
-
-          // Alignment Chime and Haptic Feedback
-          if (alignResult.isAligned) {
-            if (!hasChimedRef.current) {
-              hasChimedRef.current = true;
-              playAlignedChime();
-            }
-          } else {
-            hasChimedRef.current = false;
-          }
-        }
-      }
-
-      animationFrameRef.current = requestAnimationFrame(processFrame);
-    };
-
-    animationFrameRef.current = requestAnimationFrame(processFrame);
-
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-    };
-  }, [currentPose, alignmentSensitivity, orientationAngle, sensorInfo?.facingMode]);
+  }, [isAnalyzing, sensorInfo?.facingMode, currentPose?.title]);
 
   const [isCapturingState, setIsCapturingState] = useState(false);
   const isCapturingRef = useRef(false);
 
-  // 4. Capture Full Sensor / High-Resolution Photo with Actual Megapixels Stamp
+  // 3. Capture Full Sensor / High-Resolution Photo with Actual Megapixels Stamp
   const handleCapture = useCallback(async () => {
     if (!videoRef.current || isCapturingRef.current) return;
     isCapturingRef.current = true;
@@ -246,10 +180,8 @@ export const App: React.FC = () => {
         result.width,
         result.height,
         result.cameraUsed,
-        alignment.score,
         currentPose?.title || 'AI Director Pose'
       );
-
 
       const newPhoto: CapturedPhoto = {
         id: `photo_${Date.now()}`,
@@ -263,36 +195,27 @@ export const App: React.FC = () => {
         megapixelsFormatted: result.megapixelsFormatted,
         cameraUsed: result.cameraUsed,
         facingMode: result.facingMode,
-        alignmentScore: alignment.score,
         timestamp: Date.now(),
         isFullSensor: result.isFullSensor,
-        poseTitle: currentPose?.title || 'AI Director Photo',
-        fileSizeBytes: stampedBlob.size || result.blob.size,
+        poseTitle: currentPose?.title || 'Custom Pose',
+        fileSizeBytes: result.blob.size,
       };
 
-      setCapturedPhotos((prev) => [newPhoto, ...prev]);
-
-      // Celebrate with confetti if alignment was on point!
-      if (alignment.isAligned) {
-        confetti({
-          particleCount: 50,
-          spread: 60,
-          origin: { y: 0.8 },
-          colors: ['#10b981', '#00ff88', '#38bdf8', '#ffffff'],
-        });
-      }
-
-      // Automatically show preview
-      setShowPreview(true);
-    } catch (err) {
-      console.error('Photo capture error:', err);
+      setCapturedPhotos((prev) => [newPhoto, ...prev.slice(0, 19)]);
+    } catch (err: any) {
+      console.error('Capture failed:', err);
+      setAiNotice({
+        type: 'warn',
+        text: `Capture warning: ${err?.message || 'Photo saved with standard resolution.'}`,
+      });
+      setTimeout(() => setAiNotice(null), 3500);
     } finally {
       isCapturingRef.current = false;
       setIsCapturingState(false);
     }
-  }, [alignment, currentPose]);
+  }, [currentPose?.title]);
 
-  // 5. Unified Selfie Shutter Orchestrator with Audio Countdown & Vibration
+  // 4. Countdown Timer Shutter Trigger
   const cancelCountdown = useCallback(() => {
     if (countdownIntervalRef.current) {
       clearInterval(countdownIntervalRef.current);
@@ -303,23 +226,20 @@ export const App: React.FC = () => {
   }, []);
 
   const triggerShutter = useCallback(
-    (customDelay?: number, reason?: string) => {
-      if (isCapturingRef.current) return;
+    (delaySeconds?: number, reason?: string) => {
+      cancelCountdown();
+      const delay = typeof delaySeconds === 'number' ? delaySeconds : timerDuration;
 
-      const delay = customDelay !== undefined ? customDelay : timerDuration;
-      if (delay <= 0) {
-        cancelCountdown();
+      if (delay === 0) {
         handleCapture();
         return;
       }
 
-      cancelCountdown();
-
-      let current = delay;
-      setCountdown(current);
+      setCountdown(delay);
       setCountdownReason(reason || `${delay}s Timer`);
       playCountdownBeep(false);
 
+      let current = delay;
       countdownIntervalRef.current = window.setInterval(() => {
         current -= 1;
         if (current > 0) {
@@ -334,51 +254,40 @@ export const App: React.FC = () => {
     [timerDuration, handleCapture, cancelCountdown]
   );
 
-  // 6. Palm Gesture Detection for Front Camera (Samsung/Pixel style: Raised Palm starts 3s Countdown)
+  // 5. Palm Gesture Detection for Front Camera (Raised Palm starts 3s Countdown)
   useEffect(() => {
     if (!palmCapture || isCapturingRef.current || countdown !== null || showPreview) {
       palmHoldStartRef.current = null;
       return;
     }
 
-    if (!liveLandmarks) return;
+    let intervalId: number;
+    const checkGesture = () => {
+      const video = videoRef.current;
+      if (video && video.readyState >= 2) {
+        const now = Date.now();
+        if (now - lastPalmTriggerTimeRef.current < 4000) return;
 
-    const leftWrist = liveLandmarks['left_wrist'];
-    const leftShoulder = liveLandmarks['left_shoulder'];
-    const rightWrist = liveLandmarks['right_wrist'];
-    const rightShoulder = liveLandmarks['right_shoulder'];
-
-    const leftRaised =
-      leftWrist &&
-      leftShoulder &&
-      leftWrist.y < leftShoulder.y - 0.04 &&
-      (leftWrist.visibility ?? 1) > 0.45;
-
-    const rightRaised =
-      rightWrist &&
-      rightShoulder &&
-      rightWrist.y < rightShoulder.y - 0.04 &&
-      (rightWrist.visibility ?? 1) > 0.45;
-
-    const now = Date.now();
-    if (now - lastPalmTriggerTimeRef.current < 4000) {
-      return;
-    }
-
-    if (leftRaised || rightRaised) {
-      if (!palmHoldStartRef.current) {
-        palmHoldStartRef.current = now;
-      } else if (now - palmHoldStartRef.current > 450) {
-        lastPalmTriggerTimeRef.current = now;
-        palmHoldStartRef.current = null;
-        triggerShutter(3, '✋ Palm Detected!');
+        const isPalmRaised = poseDetectionService.detectPalmRaised(video, now);
+        if (isPalmRaised) {
+          if (!palmHoldStartRef.current) {
+            palmHoldStartRef.current = now;
+          } else if (now - palmHoldStartRef.current > 400) {
+            lastPalmTriggerTimeRef.current = now;
+            palmHoldStartRef.current = null;
+            triggerShutter(3, '✋ Palm Detected!');
+          }
+        } else {
+          palmHoldStartRef.current = null;
+        }
       }
-    } else {
-      palmHoldStartRef.current = null;
-    }
-  }, [liveLandmarks, palmCapture, countdown, showPreview, triggerShutter]);
+    };
 
-  // 7. Voice Shutter (Web Speech API: Say "Cheese" / "Smile" / "Click" to Snap)
+    intervalId = window.setInterval(checkGesture, 200);
+    return () => clearInterval(intervalId);
+  }, [palmCapture, countdown, showPreview, triggerShutter]);
+
+  // 6. Voice Shutter (Web Speech API: Say "Cheese" / "Smile" to Snap)
   useEffect(() => {
     if (!voiceCapture || showPreview) return;
 
@@ -390,7 +299,7 @@ export const App: React.FC = () => {
     if (!SpeechRecClass) {
       setAiNotice({
         type: 'warn',
-        text: 'Voice Shutter not supported in this browser. Please use Chrome on Android.',
+        text: 'Voice Shutter not supported in this browser. Please use Chrome.',
       });
       setVoiceCapture(false);
       return;
@@ -412,8 +321,6 @@ export const App: React.FC = () => {
             phrase.includes('cheese') ||
             phrase.includes('smile') ||
             phrase.includes('click') ||
-            phrase.includes('capture') ||
-            phrase.includes('shoot') ||
             phrase.includes('snap') ||
             phrase.includes('photo')
           ) {
@@ -423,14 +330,8 @@ export const App: React.FC = () => {
         }
       };
 
-      recognition.onerror = (err: any) => {
-        if (err.error === 'not-allowed') {
-          setAiNotice({
-            type: 'warn',
-            text: 'Microphone permission needed for Voice Shutter.',
-          });
-          setVoiceCapture(false);
-        }
+      recognition.onerror = () => {
+        setVoiceCapture(false);
       };
 
       recognition.onend = () => {
@@ -444,10 +345,9 @@ export const App: React.FC = () => {
       recognition.start();
       setAiNotice({
         type: 'success',
-        text: '🎙️ Voice Shutter Active! Say "Cheese", "Smile", or "Click" to snap!',
+        text: '🎙️ Voice Shutter Active! Say "Cheese" or "Smile" to snap!',
       });
-    } catch (e) {
-      console.warn('Speech recognition start failed:', e);
+    } catch {
       setVoiceCapture(false);
     }
 
@@ -461,16 +361,7 @@ export const App: React.FC = () => {
     };
   }, [voiceCapture, showPreview, triggerShutter]);
 
-  // 8. Auto-Capture Trigger when Aligned
-  useEffect(() => {
-    if (!autoCapture) return;
-
-    if (alignment.isAligned && countdown === null && !showPreview && !isCapturingRef.current) {
-      triggerShutter(1, '✨ Pose Matched! Hold still...');
-    }
-  }, [alignment.isAligned, autoCapture, countdown, showPreview, triggerShutter]);
-
-  // 9. Hardware Shutter Keys: Smartphone Volume Up/Down, Bluetooth Selfie Sticks, Laptop Spacebar/Enter
+  // 7. Hardware Keys: Volume Up/Down, Spacebar, Enter
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (
@@ -489,10 +380,6 @@ export const App: React.FC = () => {
         key === 'AudioVolumeDown' ||
         key === 'VolumeUp' ||
         key === 'VolumeDown' ||
-        code === 'AudioVolumeUp' ||
-        code === 'AudioVolumeDown' ||
-        key === 'Camera' ||
-        code === 'Camera' ||
         key === ' ' ||
         code === 'Space' ||
         key === 'Enter' ||
@@ -505,22 +392,12 @@ export const App: React.FC = () => {
     };
 
     window.addEventListener('keydown', handleKeyDown, { capture: true });
-
-    if ('mediaSession' in navigator) {
-      try {
-        navigator.mediaSession.setActionHandler('play', () => triggerShutter());
-        navigator.mediaSession.setActionHandler('pause', () => triggerShutter());
-        navigator.mediaSession.setActionHandler('nexttrack', () => triggerShutter());
-        navigator.mediaSession.setActionHandler('previoustrack', () => triggerShutter());
-      } catch {}
-    }
-
     return () => {
       window.removeEventListener('keydown', handleKeyDown, { capture: true });
     };
   }, [triggerShutter]);
 
-  // 6. Camera Controls: Front / Back Camera Switch
+  // 8. Camera Controls: Front / Back Camera Switch
   const handleSwitchCamera = async () => {
     if (!videoRef.current || cameraSwitching) return;
     setCameraSwitching(true);
@@ -542,7 +419,6 @@ export const App: React.FC = () => {
     }
   };
 
-
   const handleToggleTorch = async () => {
     const state = await cameraService.toggleTorch();
     setTorchActive(state);
@@ -555,6 +431,11 @@ export const App: React.FC = () => {
     const updated = await cameraService.setResolutionMode(nextMode);
     setSensorInfo(updated);
     triggerHaptic('light');
+    setAiNotice({
+      type: 'success',
+      text: `Sensor set to ${updated.maxMegapixels} MP (${nextMode.toUpperCase()})`,
+    });
+    setTimeout(() => setAiNotice(null), 2500);
   };
 
   const handleSetResolutionMode = async (mode: ResolutionMode) => {
@@ -563,89 +444,84 @@ export const App: React.FC = () => {
     triggerHaptic('light');
   };
 
-  const handleSetZoom = async (level: number) => {
-    await cameraService.setZoom(level);
-    setSensorInfo((prev) => (prev ? { ...prev, zoomCurrent: level } : null));
+  const handleSetZoom = async (zoomLevel: number) => {
+    await cameraService.setZoom(zoomLevel);
     triggerHaptic('light');
+    const updated = await cameraService.getSensorInfo();
+    setSensorInfo(updated);
   };
 
-  // Touch to focus handler & Tap to Snap
-  const handleTouchFocus = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+  // 9. Viewfinder Touch Tap-to-Focus & Tap-to-Snap
+  const handleViewfinderTap = (e: React.MouseEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest('button, [data-interactive="true"]')) return;
 
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
 
     setTapFocusCoord({ x, y });
     triggerHaptic('light');
     setTimeout(() => setTapFocusCoord(null), 1200);
-  };
 
-  const handleViewfinderClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (countdown !== null) {
-      cancelCountdown();
-      return;
-    }
-
-    handleTouchFocus(e);
-
-    if (tapToCapture) {
+    if (tapToCapture && !isCapturingRef.current) {
       triggerShutter();
     }
   };
 
   return (
-    <div className="relative w-full h-[100dvh] bg-black overflow-hidden select-none touch-none flex flex-col justify-center items-center">
-      {/* 1. Fullscreen Video Stream Viewfinder */}
+    <div className="relative w-screen h-screen bg-black overflow-hidden select-none font-sans flex flex-col justify-between">
+      {/* 1. Live Optical Video Stream Viewfinder */}
       <div
-        className="relative w-full h-full flex items-center justify-center overflow-hidden cursor-pointer"
-        onClick={handleViewfinderClick}
+        className="relative w-full h-full flex items-center justify-center overflow-hidden cursor-crosshair"
+        onClick={handleViewfinderTap}
       >
         <video
           ref={videoRef}
           playsInline
           autoPlay
           muted
-          className={`w-full h-full ${
+          className={`w-full h-full transition-all duration-300 ${
             viewfinderMode === 'wide' ? 'object-contain' : 'object-cover'
-          } transition-all duration-300 ${
-            sensorInfo?.facingMode === 'user' ? 'scale-x-[-1]' : ''
-          }`}
+          } ${sensorInfo?.facingMode === 'user' ? '-scale-x-100' : ''}`}
         />
 
-        {/* 2. AI Silhouette & Skeletal Overlay (Target & Live Detection Wireframe) */}
-        <SkeletalOverlay
-          currentPose={currentPose}
-          liveLandmarks={liveLandmarks}
-          alignment={alignment}
-          isMirrored={sensorInfo?.facingMode === 'user'}
-          opacity={guideOpacity}
-          guideMode={guideMode}
-          videoElement={videoRef.current}
-          viewfinderFit={viewfinderMode}
-          orientationAngle={orientationAngle}
-        />
+        {/* 2. Visual Shutter Flash Effect */}
+        {shutterFlashing && (
+          <div className="absolute inset-0 z-40 bg-white pointer-events-none animate-in fade-in duration-75" />
+        )}
 
-
-        {/* 3. Touch Focus Ring */}
+        {/* 3. Tap Focus Reticle Indicator */}
         {tapFocusCoord && (
           <div
-            className="absolute pointer-events-none z-30 w-16 h-16 border-2 border-emerald-400 rounded-lg animate-ping flex items-center justify-center -translate-x-1/2 -translate-y-1/2"
-            style={{ left: tapFocusCoord.x, top: tapFocusCoord.y }}
+            className="absolute z-35 pointer-events-none -translate-x-1/2 -translate-y-1/2 animate-in zoom-in-75 duration-150"
+            style={{
+              left: `${tapFocusCoord.x * 100}%`,
+              top: `${tapFocusCoord.y * 100}%`,
+            }}
           >
-            <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full" />
+            <div className="w-16 h-16 border-2 border-amber-400 rounded-lg shadow-lg flex items-center justify-center">
+              <div className="w-1.5 h-1.5 bg-amber-400 rounded-full" />
+            </div>
           </div>
         )}
 
-        {/* 4. White Shutter Flash Effect */}
-        {shutterFlashing && (
-          <div className="absolute inset-0 bg-white z-40 animate-shutter pointer-events-none" />
+        {/* 4. Rule-of-Thirds Composition Grid */}
+        {showGrid && (
+          <div className="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-3 z-25 opacity-35">
+            <div className="border-r border-b border-white/60" />
+            <div className="border-r border-b border-white/60" />
+            <div className="border-b border-white/60" />
+            <div className="border-r border-b border-white/60" />
+            <div className="border-r border-b border-white/60" />
+            <div className="border-b border-white/60" />
+            <div className="border-r border-white/60" />
+            <div className="border-r border-white/60" />
+            <div />
+          </div>
         )}
       </div>
 
-      {/* 5. AI Vision Feedback Notification Toast (Top pinned, non-intrusive) */}
+      {/* 5. AI Director Dynamic Feedback Toast Banner */}
       {aiNotice && (
         <div className="absolute top-16 left-4 right-4 z-40 flex justify-center pointer-events-none animate-in fade-in slide-in-from-top-3 duration-300">
           <div
@@ -661,22 +537,6 @@ export const App: React.FC = () => {
               <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />
             )}
             <span className="leading-snug flex-1">{aiNotice.text}</span>
-            {aiNotice.type === 'warn' && (
-              <div className="flex items-center gap-1.5 flex-shrink-0">
-                <button
-                  onClick={() => setShowSettings(true)}
-                  className="px-2 py-1 rounded-lg bg-white/20 hover:bg-white/30 active:scale-95 text-white font-semibold text-[11px] transition-all"
-                >
-                  Settings ⚙️
-                </button>
-                <button
-                  onClick={handlePerformAnalysis}
-                  className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 active:scale-95 text-black font-bold text-[11px] transition-all"
-                >
-                  Retry
-                </button>
-              </div>
-            )}
             <button
               onClick={() => setAiNotice(null)}
               className="p-1 text-gray-400 hover:text-white transition-colors"
@@ -687,13 +547,13 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      {/* 6. Camera Loading / Permission Error Banner */}
+      {/* 6. Camera Loading & Error Banners */}
       {cameraLoading && (
         <div className="absolute inset-0 z-50 bg-black/90 flex flex-col items-center justify-center gap-3 p-6 text-center">
           <div className="w-12 h-12 rounded-full border-4 border-emerald-500 border-t-transparent animate-spin" />
           <h3 className="text-base font-semibold text-white">Starting Optical Sensor...</h3>
           <p className="text-xs text-gray-400 max-w-xs">
-            Configuring ultra-high-resolution RAW camera capabilities and AI Director.
+            Connecting to full-sensor camera and initializing AI Director.
           </p>
         </div>
       )}
@@ -713,11 +573,9 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      {/* 7. Mobile Camera HUD Controls with Front/Back Switcher & Posture Bar */}
+      {/* 7. Clean Mobile Camera HUD Controls */}
       <CameraHUD
         currentPose={currentPose}
-        onSelectPose={(pose) => setCurrentPose(pose)}
-        alignment={alignment}
         sensorInfo={sensorInfo}
         torchActive={torchActive}
         onToggleTorch={handleToggleTorch}
@@ -725,17 +583,12 @@ export const App: React.FC = () => {
         onCapture={() => triggerShutter()}
         onAnalyzeScene={handlePerformAnalysis}
         isAnalyzing={isAnalyzing}
-        onOpenPoseSelector={() => setShowPoseSelector(true)}
         onOpenSettings={() => setShowSettings(true)}
         onOpenGallery={() => setShowPreview(true)}
         lastPhoto={lastPhoto}
         showGrid={showGrid}
         onToggleGrid={() => setShowGrid(!showGrid)}
         cameraSwitching={cameraSwitching}
-        guideMode={guideMode}
-        onToggleGuideMode={() =>
-          setGuideMode((prev) => (prev === 'silhouette' ? 'hybrid' : prev === 'hybrid' ? 'skeletal' : 'silhouette'))
-        }
         isCapturing={isCapturingState}
         onToggleResolutionMode={handleToggleResolutionMode}
         viewfinderMode={viewfinderMode}
@@ -761,11 +614,6 @@ export const App: React.FC = () => {
           setVoiceCapture((prev) => !prev);
           triggerHaptic('light');
         }}
-        autoCapture={autoCapture}
-        onToggleAutoCapture={() => {
-          setAutoCapture((prev) => !prev);
-          triggerHaptic('light');
-        }}
         countdown={countdown}
         countdownReason={countdownReason}
         onCancelCountdown={cancelCountdown}
@@ -773,14 +621,15 @@ export const App: React.FC = () => {
         onCycleOrientation={cycleOrientation}
       />
 
-
-      {/* Floating Draggable Picture-In-Picture Reference Card */}
+      {/* 8. Floating Draggable Picture-In-Picture Reference Card */}
       <PoseReferencePIP
         currentPose={currentPose}
+        isAnalyzing={isAnalyzing}
+        onRegeneratePose={handlePerformAnalysis}
         onOpenGallery={() => setShowPreview(true)}
       />
 
-      {/* 8. Full Resolution Photo Review Modal with Actual Megapixel Verification */}
+      {/* 9. Full Resolution Photo Review Modal */}
       {showPreview && (
         <PhotoPreviewModal
           photo={lastPhoto}
@@ -789,32 +638,14 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* 9. AI Pose Presets & Scene Analysis Modal */}
-      {showPoseSelector && (
-        <PoseSelectorModal
-          currentPose={currentPose}
-          onSelectPose={(pose) => setCurrentPose(pose)}
-          onAnalyzeScene={handlePerformAnalysis}
-          isAnalyzing={isAnalyzing}
-          onClose={() => setShowPoseSelector(false)}
-        />
-      )}
-
       {/* 10. Settings Modal */}
       {showSettings && (
         <SettingsModal
           sensorInfo={sensorInfo}
-          autoCapture={autoCapture}
-          onToggleAutoCapture={setAutoCapture}
-          alignmentSensitivity={alignmentSensitivity}
-          onSetSensitivity={setAlignmentSensitivity}
-          guideOpacity={guideOpacity}
-          onSetGuideOpacity={setGuideOpacity}
           onClose={() => setShowSettings(false)}
           onSetResolutionMode={handleSetResolutionMode}
         />
       )}
-
     </div>
   );
 };

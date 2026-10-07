@@ -1,19 +1,25 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Maximize2, Sparkles, Image as ImageIcon, GripHorizontal, Move } from 'lucide-react';
-import type { PosePreset } from '../types/camera';
+import { X, Maximize2, Sparkles, Image as ImageIcon, GripHorizontal, Move, RefreshCw, Layers } from 'lucide-react';
+import type { AIPoseSuggestion } from '../types/camera';
 
 interface PoseReferencePIPProps {
-  currentPose: PosePreset | null;
+  currentPose: AIPoseSuggestion | null;
+  isAnalyzing?: boolean;
+  onRegeneratePose?: () => void;
   onOpenGallery?: () => void;
 }
 
-export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({ currentPose }) => {
+export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({
+  currentPose,
+  isAnalyzing = false,
+  onRegeneratePose,
+}) => {
   const [isMinimized, setIsMinimized] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Free-floating draggable coordinates (defaults to upper-middle left so it never covers bottom carousel)
+  // Free-floating draggable coordinates
   const [pos, setPos] = useState<{ x: number; y: number }>(() => {
-    const defaultY = typeof window !== 'undefined' ? Math.max(75, window.innerHeight - 380) : 260;
+    const defaultY = typeof window !== 'undefined' ? Math.max(75, window.innerHeight - 380) : 220;
     return { x: 12, y: defaultY };
   });
 
@@ -29,11 +35,11 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({ currentPose 
     startX: 0,
     startY: 0,
     startPosX: 12,
-    startPosY: 260,
+    startPosY: 220,
     hasMoved: false,
   });
 
-  // Global window pointer listeners while dragging for 100% fluid mobile & desktop tracking
+  // Global window pointer listeners for smooth dragging on mobile and desktop
   useEffect(() => {
     if (!isDragging) return;
 
@@ -45,12 +51,12 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({ currentPose 
         dragRef.current.hasMoved = true;
       }
 
-      const cardWidth = 112;
-      const cardHeight = 148;
+      const cardWidth = 140;
+      const cardHeight = 190;
       const minX = 8;
       const maxX = Math.max(8, window.innerWidth - cardWidth - 8);
-      const minY = 50; // below status bar
-      const maxY = Math.max(50, window.innerHeight - cardHeight - 20); // above bottom edge
+      const minY = 50;
+      const maxY = Math.max(50, window.innerHeight - cardHeight - 20);
 
       const nextX = Math.max(minX, Math.min(maxX, dragRef.current.startPosX + dx));
       const nextY = Math.max(minY, Math.min(maxY, dragRef.current.startPosY + dy));
@@ -60,7 +66,6 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({ currentPose 
 
     const onPointerUp = () => {
       setIsDragging(false);
-      // If pointer was released without significant movement (<= 5px), treat as tap
       if (!dragRef.current.hasMoved) {
         if (isMinimized) {
           setIsMinimized(false);
@@ -83,10 +88,9 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({ currentPose 
 
   if (!currentPose) return null;
 
-  const hasPhoto = Boolean(currentPose.referenceImage);
+  const hasPhoto = Boolean(currentPose.referenceImageUrl);
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    // Prevent drag if tapping a button (Maximize or Close)
     if ((e.target as HTMLElement).closest('button')) return;
 
     dragRef.current = {
@@ -99,7 +103,7 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({ currentPose 
     setIsDragging(true);
   };
 
-  // If minimized by the user, show a movable floating pill button to restore
+  // Minimized floating pill button
   if (isMinimized) {
     return (
       <div
@@ -110,13 +114,13 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({ currentPose 
         }}
         onPointerDown={handlePointerDown}
         className={`fixed z-35 pointer-events-auto select-none touch-none animate-in fade-in zoom-in-95 duration-200 cursor-grab ${
-          isDragging ? 'cursor-grabbing scale-105 shadow-xl ring-2 ring-amber-400' : ''
+          isDragging ? 'cursor-grabbing scale-105 shadow-xl ring-2 ring-emerald-400' : ''
         }`}
       >
-        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/90 hover:bg-black text-white text-xs font-medium border border-amber-400/80 shadow-2xl backdrop-blur-md active:scale-95 transition-all">
-          <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
+        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/90 hover:bg-black text-white text-xs font-medium border border-emerald-400/80 shadow-2xl backdrop-blur-md active:scale-95 transition-all">
+          <ImageIcon className="w-3.5 h-3.5 text-emerald-400" />
           <span className="font-semibold">{currentPose.title.split(' ')[0]} Ref</span>
-          <Move className="w-3 h-3 text-amber-300 opacity-60 ml-0.5" />
+          <Move className="w-3 h-3 text-emerald-300 opacity-60 ml-0.5" />
         </div>
       </div>
     );
@@ -124,7 +128,7 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({ currentPose 
 
   return (
     <>
-      {/* 1. Fully Draggable Picture-in-Picture Floating Card */}
+      {/* 1. Fully Draggable Picture-in-Picture Floating Reference Card */}
       <div
         style={{
           left: `${pos.x}px`,
@@ -134,39 +138,61 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({ currentPose 
         onPointerDown={handlePointerDown}
         className={`fixed z-35 pointer-events-auto select-none touch-none transition-shadow duration-150 cursor-grab ${
           isDragging
-            ? 'cursor-grabbing scale-105 shadow-[0_15px_40px_rgba(245,158,11,0.5)] ring-2 ring-amber-400'
+            ? 'cursor-grabbing scale-105 shadow-[0_15px_40px_rgba(16,185,129,0.5)] ring-2 ring-emerald-400'
             : 'hover:scale-102 shadow-2xl'
         }`}
       >
-        <div className="relative group w-24 xs:w-28 h-32 xs:h-36 rounded-2xl bg-black/90 border-2 border-amber-400/80 overflow-hidden backdrop-blur-md flex flex-col">
+        <div className="relative group w-32 xs:w-36 h-44 xs:h-48 rounded-2xl bg-black/90 border-2 border-emerald-400/80 overflow-hidden backdrop-blur-md flex flex-col">
           {/* Top Drag Pill Handle */}
-          <div className="absolute top-1 left-1 z-20 flex items-center gap-1 bg-black/75 px-1.5 py-0.5 rounded-full text-[9px] text-amber-300 font-mono pointer-events-none shadow-sm border border-amber-400/20">
-            <GripHorizontal className="w-3 h-3 text-amber-400" />
-            <span className="font-bold">DRAG</span>
+          <div className="absolute top-1 left-1 z-20 flex items-center gap-1 bg-black/75 px-1.5 py-0.5 rounded-full text-[9px] text-emerald-300 font-mono pointer-events-none shadow-sm border border-emerald-400/20">
+            <GripHorizontal className="w-3 h-3 text-emerald-400" />
+            <span className="font-bold">POSE REF</span>
           </div>
 
-          {/* Reference Image or AI Card */}
+          {/* AI Analyzing / Generating Loading Overlay */}
+          {isAnalyzing && (
+            <div className="absolute inset-0 z-30 bg-black/80 backdrop-blur-xs flex flex-col items-center justify-center p-2 text-center">
+              <RefreshCw className="w-6 h-6 text-emerald-400 animate-spin mb-1" />
+              <span className="text-[10px] font-bold text-white">Synthesizing...</span>
+              <span className="text-[8px] text-gray-400">Analyzing objects</span>
+            </div>
+          )}
+
+          {/* Reference Image or Fallback */}
           {hasPhoto ? (
             <img
-              src={currentPose.referenceImage}
+              src={currentPose.referenceImageUrl}
               alt={currentPose.title}
               draggable={false}
               className="w-full h-full object-cover pointer-events-none select-none"
             />
           ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center p-2 text-center bg-gradient-to-br from-amber-950/70 via-black to-zinc-950 pointer-events-none select-none">
-              <Sparkles className="w-5 h-5 text-amber-400 mb-1 animate-pulse" />
-              <span className="text-[10px] font-bold text-white leading-tight line-clamp-2">
+            <div className="w-full h-full flex flex-col items-center justify-center p-2 text-center bg-gradient-to-br from-emerald-950/70 via-black to-zinc-950 pointer-events-none select-none">
+              <Sparkles className="w-6 h-6 text-emerald-400 mb-1 animate-pulse" />
+              <span className="text-[11px] font-bold text-white leading-tight line-clamp-2">
                 {currentPose.title}
               </span>
-              <span className="text-[9px] text-amber-300/80 mt-1 uppercase tracking-wider font-mono">
-                {currentPose.category}
+              <span className="text-[9px] text-emerald-300/80 mt-1 uppercase tracking-wider font-mono">
+                {currentPose.vibe}
               </span>
             </div>
           )}
 
-          {/* Top Right Action Buttons (Enlarge / Minimize) */}
+          {/* Top Right Action Buttons (Enlarge, Regenerate, Minimize) */}
           <div className="absolute top-1 right-1 z-20 flex items-center gap-1">
+            {onRegeneratePose && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRegeneratePose();
+                }}
+                disabled={isAnalyzing}
+                className="p-1 rounded-full bg-black/75 hover:bg-black text-white/80 hover:text-white transition-colors border border-white/10 active:scale-95"
+                title="Generate another pose idea for this scene"
+              >
+                <RefreshCw className={`w-3 h-3 text-emerald-400 ${isAnalyzing ? 'animate-spin' : ''}`} />
+              </button>
+            )}
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -189,11 +215,16 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({ currentPose 
             </button>
           </div>
 
-          {/* Bottom Title Banner */}
-          <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/95 via-black/70 to-transparent p-1.5 pt-3 pointer-events-none select-none">
-            <span className="text-[9px] font-bold text-amber-300 block truncate">
+          {/* Bottom Title & Object Badge Banner */}
+          <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/95 via-black/80 to-transparent p-1.5 pt-4 pointer-events-none select-none">
+            <span className="text-[10px] font-bold text-emerald-300 block truncate">
               {currentPose.title}
             </span>
+            {currentPose.sceneObjects && currentPose.sceneObjects.length > 0 && (
+              <span className="text-[8px] text-gray-300 truncate block">
+                🎯 {currentPose.sceneObjects.slice(0, 2).join(', ')}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -206,15 +237,15 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({ currentPose 
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="relative max-w-sm w-full bg-[#121218] border border-amber-400/40 rounded-3xl overflow-hidden shadow-2xl flex flex-col"
+            className="relative max-w-sm w-full bg-[#121218] border border-emerald-400/40 rounded-3xl overflow-hidden shadow-2xl flex flex-col"
           >
-            {/* Header */}
+            {/* Modal Header */}
             <div className="flex items-center justify-between p-3.5 border-b border-white/10">
               <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
                 <span className="text-xs font-bold text-white">{currentPose.title}</span>
-                <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30">
-                  {currentPose.category}
+                <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-emerald-400/20 text-emerald-300 border border-emerald-400/30">
+                  {currentPose.vibe}
                 </span>
               </div>
               <button
@@ -225,30 +256,63 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({ currentPose 
               </button>
             </div>
 
-            {/* Photo / Visual */}
+            {/* AI Generated Photo */}
             <div className="max-h-[60vh] bg-black flex items-center justify-center overflow-hidden">
               {hasPhoto ? (
                 <img
-                  src={currentPose.referenceImage}
+                  src={currentPose.referenceImageUrl}
                   alt={currentPose.title}
                   className="w-full h-full object-contain"
                 />
               ) : (
                 <div className="p-8 text-center space-y-2">
-                  <Sparkles className="w-8 h-8 text-amber-400 mx-auto" />
+                  <Sparkles className="w-8 h-8 text-emerald-400 mx-auto" />
                   <p className="text-sm font-semibold text-white">{currentPose.title}</p>
-                  <p className="text-xs text-gray-400">{currentPose.reasoning}</p>
                 </div>
               )}
             </div>
 
+            {/* Scene Objects Used Tags */}
+            {currentPose.sceneObjects && currentPose.sceneObjects.length > 0 && (
+              <div className="px-4 py-2 bg-black/40 border-t border-white/5 flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+                <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                  <Layers className="w-3 h-3" /> Objects:
+                </span>
+                {currentPose.sceneObjects.map((obj, i) => (
+                  <span
+                    key={i}
+                    className="px-2 py-0.5 rounded-md bg-white/10 text-[10px] text-gray-200 whitespace-nowrap"
+                  >
+                    {obj}
+                  </span>
+                ))}
+              </div>
+            )}
+
             {/* Direction Cue Footer */}
-            <div className="p-4 bg-white/5 space-y-1">
-              <div className="text-[11px] font-semibold text-amber-300 flex items-center gap-1">
-                <span>💡 Director Advice</span>
+            <div className="p-4 bg-white/5 space-y-1.5 border-t border-white/10">
+              <div className="text-[11px] font-semibold text-emerald-300 flex items-center gap-1">
+                <span>💡 Pose Guidance</span>
               </div>
               <p className="text-xs text-gray-200 leading-relaxed">{currentPose.directionTip}</p>
             </div>
+
+            {/* Action Bar */}
+            {onRegeneratePose && (
+              <div className="p-3 bg-black/60 border-t border-white/10 flex justify-end">
+                <button
+                  onClick={() => {
+                    onRegeneratePose();
+                    setIsExpanded(false);
+                  }}
+                  disabled={isAnalyzing}
+                  className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all shadow-md shadow-emerald-500/20"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isAnalyzing ? 'animate-spin' : ''}`} />
+                  <span>Generate Another Pose</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

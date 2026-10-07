@@ -1,9 +1,6 @@
 /**
  * Utility to generate a high-end photography watermark banner burned directly into the output photo.
- * This guarantees the end photo explicitly contains the actual megapixel of the camera used,
- * camera sensor mode, resolution, and AI alignment score.
- * 
- * Supports direct CanvasImageSource (e.g. HTMLVideoElement) for sub-20ms instant stamping!
+ * Contains the actual megapixel of the camera used, camera sensor mode, resolution, and pose title.
  */
 export async function createStampedPhoto(
   originalBlob: Blob,
@@ -11,10 +8,8 @@ export async function createStampedPhoto(
   width: number,
   height: number,
   cameraUsed: string,
-  alignmentScore: number,
   poseTitle: string
 ): Promise<{ stampedBlob: Blob; stampedUrl: string }> {
-  // Height of watermark banner proportional to the image height
   const bannerHeight = Math.max(90, Math.round(height * 0.07));
   const totalWidth = width;
   const totalHeight = height + bannerHeight;
@@ -28,7 +23,7 @@ export async function createStampedPhoto(
     return { stampedBlob: originalBlob, stampedUrl: URL.createObjectURL(originalBlob) };
   }
 
-  // 1. Draw the high-resolution photo from originalBlob (which is already correctly oriented)
+  // 1. Draw the high-resolution photo from originalBlob
   try {
     const bitmap = await createImageBitmap(originalBlob);
     ctx.drawImage(bitmap, 0, 0, width, height);
@@ -84,7 +79,7 @@ export async function createStampedPhoto(
     centerY + Math.round(bannerHeight * 0.04)
   );
 
-  // --- Right Section: Prominent Actual Megapixel of the Camera Used ---
+  // --- Right Section: Megapixel Badge & Pose Info ---
   ctx.textAlign = 'right';
   ctx.textBaseline = 'bottom';
   ctx.font = `900 ${badgeFontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
@@ -100,7 +95,7 @@ export async function createStampedPhoto(
   ctx.fillStyle = '#d1d5db';
   const formattedDate = new Date().toISOString().split('T')[0];
   ctx.fillText(
-    `AI MATCH ${alignmentScore}% • ${poseTitle.toUpperCase()} • ${formattedDate}`,
+    `AI DIRECTOR • ${poseTitle.toUpperCase()} • ${formattedDate}`,
     totalWidth - paddingX,
     centerY + Math.round(bannerHeight * 0.04)
   );
@@ -123,4 +118,3 @@ export async function createStampedPhoto(
     );
   });
 }
-

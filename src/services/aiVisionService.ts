@@ -1,73 +1,26 @@
-import type { PosePreset, SceneAnalysisResponse, PoseLandmarks, PoseArchetype, JointName } from '../types/camera';
-import { DEFAULT_POSES } from '../data/defaultPoses';
+import type { AIPoseSuggestion } from '../types/camera';
 
 const API_KEY_STORAGE = 'gemini_api_key';
 const MODEL_PREF_STORAGE = 'gemini_model_preference';
 
-// List of legacy/deprecated model aliases to ignore
-const DEPRECATED_MODELS = [
-  'gemini-2.5-pro',
-  'gemini-2.5-flash-lite',
-  'gemini-2.0-flash',
-  'gemini-2.0-flash-lite',
-  'gemini-1.5-flash',
-  'gemini-1.5-flash-latest',
-  'gemini-1.5-pro',
-  'gemini-1.5-pro-latest',
-];
-
 export class AIVisionService {
   private apiKey: string = '';
-  private preferredModel: string = 'auto';
-  private cachedModels: string[] = [];
+  private preferredModel: string = 'gemini-2.5-flash';
 
   constructor() {
     this.apiKey = this.sanitizeApiKey(
-      localStorage.getItem(API_KEY_STORAGE) || (import.meta.env.VITE_GEMINI_API_KEY as string) || ''
+      localStorage.getItem(API_KEY_STORAGE) || (import.meta as any).env?.VITE_GEMINI_API_KEY || ''
     );
-    const storedModel = localStorage.getItem(MODEL_PREF_STORAGE) || 'auto';
-    // If user previously saved a deprecated model (e.g. gemini-2.5-pro), reset to auto
-    if (DEPRECATED_MODELS.includes(storedModel)) {
-      this.preferredModel = 'auto';
-      localStorage.setItem(MODEL_PREF_STORAGE, 'auto');
-    } else {
-      this.preferredModel = storedModel;
-    }
-  }
-
-  public getApiKey(): string {
-    return this.apiKey;
+    this.preferredModel = localStorage.getItem(MODEL_PREF_STORAGE) || 'gemini-2.5-flash';
   }
 
   public sanitizeApiKey(key: string): string {
     if (!key) return '';
-    // Strip invisible Unicode characters, BOM, zero-width chars, non-breaking space
-    let clean = key.replace(/[\u200B-\u200D\uFEFF\u00A0\r\n\t]/g, '').trim();
-    // Strip quotes (including smart quotes)
-    clean = clean.replace(/^[“”"''`]|["'“”'`]$/g, '').trim();
-    // Strip common assignment prefixes
-    clean = clean.replace(/^(?:export\s+)?(?:gemini_api_key|api_key|key)\s*[:=]\s*/i, '').trim();
-    clean = clean.replace(/^Bearer\s+/i, '').trim();
-
-    // Auto-extract modern 'AQ....' key if embedded in text
-    const aqMatch = clean.match(/AQ\.[0-9A-Za-z_-]{30,75}/);
-    if (aqMatch) {
-      return aqMatch[0];
-    }
-
-    // Auto-extract legacy 39-character AIza key if embedded in text
-    const aizaMatch = clean.match(/AIza[0-9A-Za-z_-]{35}/);
-    if (aizaMatch) {
-      return aizaMatch[0];
-    }
-
-    return clean.replace(/["'“”'`\s]/g, '');
+    return key.replace(/["';\s\\]/g, '').trim();
   }
 
   public setApiKey(key: string): void {
-    const clean = this.sanitizeApiKey(key);
-    this.apiKey = clean;
-    this.cachedModels = []; // reset cached models on key change
+    this.apiKey = this.sanitizeApiKey(key);
     if (this.apiKey) {
       localStorage.setItem(API_KEY_STORAGE, this.apiKey);
     } else {
@@ -75,223 +28,161 @@ export class AIVisionService {
     }
   }
 
+  public getApiKey(): string {
+    return this.apiKey;
+  }
+
+  public setPreferredModel(model: string): void {
+    this.preferredModel = model;
+    localStorage.setItem(MODEL_PREF_STORAGE, model);
+  }
+
   public getPreferredModel(): string {
     return this.preferredModel;
   }
 
-  public setPreferredModel(model: string): void {
-    if (DEPRECATED_MODELS.includes(model)) {
-      this.preferredModel = 'auto';
-    } else {
-      this.preferredModel = model;
-    }
-    localStorage.setItem(MODEL_PREF_STORAGE, this.preferredModel);
-  }
-
   public hasApiKey(): boolean {
-    return Boolean(this.apiKey && this.apiKey.length > 10);
+    return Boolean(this.apiKey && this.apiKey.trim().length > 0);
   }
 
-  public getCachedModels(): string[] {
-    return this.cachedModels;
-  }
-
-  /**
-   * Tests the connection with the user's API key by listing available models.
-   */
-  public async testConnection(): Promise<{ success: boolean; message: string; models?: string[] }> {
-    if (!this.hasApiKey()) {
-      return { success: false, message: 'Please enter a Gemini API key first.' };
-    }
-
-    // Reset cached models for fresh discovery
-    this.cachedModels = [];
-
-    if (this.apiKey.length < 15) {
-      return {
-        success: false,
-        message: 'Key seems too short. Please copy the complete key from Google AI Studio.',
-      };
+  public async testConnection(key?: string): Promise<{ success: boolean; message: string; models?: string[] }> {
+    const cleanKey = this.sanitizeApiKey(key || this.apiKey);
+    if (!cleanKey) {
+      return { success: false, message: 'API key is empty.' };
     }
 
     try {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models?key=${this.apiKey}`;
-      const response = await fetch(endpoint);
-      if (!response.ok) {
-        const errText = await response.text();
-        const cleanMsg = this.cleanErrorMessage(errText);
-        if (response.status === 400 || cleanMsg.includes('API_KEY_INVALID') || cleanMsg.includes('API key not valid')) {
-          return {
-            success: false,
-            message: 'Invalid API key. Google rejected this key (HTTP 400: API_KEY_INVALID). Please generate a fresh key from aistudio.google.com/apikey.',
-          };
-        }
-        if (response.status === 403 || cleanMsg.includes('PERMISSION_DENIED')) {
-          return {
-            success: false,
-            message: 'Permission denied (HTTP 403). Ensure "Generative Language API" is enabled in your Google Cloud / AI Studio project.',
-          };
-        }
-        return { success: false, message: `Google error (${response.status}): ${cleanMsg}` };
+      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`);
+      if (!resp.ok) {
+        return { success: false, message: `Google returned error status ${resp.status}. Please verify your key.` };
       }
+      const data = await resp.json();
+      const models: string[] = (data.models || [])
+        .map((m: any) => m.name.replace('models/', ''))
+        .filter((n: string) => n.startsWith('gemini'));
 
-      const availableModels = await this.discoverAvailableModels();
-      if (availableModels.length > 0) {
-        const topModel = availableModels[0];
-        return {
-          success: true,
-          message: `Connected successfully! Active model: ${topModel}`,
-          models: availableModels,
-        };
-      }
       return {
-        success: false,
-        message: 'Key validated, but no active vision models found.',
+        success: true,
+        message: `Connected successfully! Found ${models.length} Gemini models.`,
+        models,
       };
-    } catch (err: any) {
-      return {
-        success: false,
-        message: err?.message || 'Connection failed. Please check your API key.',
-      };
+    } catch (e: any) {
+      return { success: false, message: `Network error: ${e?.message || 'Could not connect'}` };
     }
   }
 
   /**
-   * Queries Google Gemini API to discover the exact models supported by this API key,
-   * automatically filtering out discontinued models and prioritizing Gemini 3.5 & 3.8 Flash.
+   * Generates a photorealistic reference image from an image generation prompt.
+   * 1. Attempts Google Imagen 3 if API key is available.
+   * 2. Seamlessly falls back to fast, high-quality Pollinations Flux generation.
    */
-  public async discoverAvailableModels(): Promise<string[]> {
-    if (this.cachedModels.length > 0) return this.cachedModels;
+  public async generateImageFromPrompt(
+    prompt: string,
+    aspectRatio: '3:4' | '1:1' = '3:4'
+  ): Promise<string> {
+    // 1. Try Google Imagen 3 API if key is set
+    if (this.apiKey) {
+      try {
+        const imagenEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${this.apiKey}`;
+        const resp = await fetch(imagenEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            instances: [{ prompt }],
+            parameters: {
+              sampleCount: 1,
+              aspectRatio,
+              outputMimeType: 'image/jpeg',
+            },
+          }),
+        });
 
-    try {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models?key=${this.apiKey}`;
-      const response = await fetch(endpoint);
-      if (response.ok) {
-        const data = await response.json();
-        if (Array.isArray(data.models)) {
-          const supported = data.models
-            .filter((m: any) =>
-              Array.isArray(m.supportedGenerationMethods) &&
-              m.supportedGenerationMethods.includes('generateContent')
-            )
-            .map((m: any) => m.name.replace(/^models\//, ''))
-            .filter((name: string) => !DEPRECATED_MODELS.includes(name));
-
-          // Modern priority ranking: Gemini 3.5 Flash > 3.8 Flash > 3.5 Flash-Lite > 3.8 Flash-Lite > 2.5 Flash
-          const prioritized = supported.sort((a: string, b: string) => {
-            const score = (name: string) => {
-              if (name.includes('3.5-flash')) return 110;
-              if (name.includes('3.8-flash')) return 105;
-              if (name.includes('3.5-flash-lite')) return 100;
-              if (name.includes('3.8-flash-lite')) return 95;
-              if (name.includes('3.1-pro')) return 90;
-              if (name.includes('3.8-pro')) return 85;
-              if (name.includes('3.5')) return 80;
-              if (name.includes('3.8')) return 75;
-              if (name === 'gemini-2.5-flash') return 70;
-              if (name.includes('flash')) return 60;
-              if (name.includes('pro')) return 50;
-              return 10;
-            };
-            return score(b) - score(a);
-          });
-
-          if (prioritized.length > 0) {
-            this.cachedModels = prioritized;
-            return prioritized;
+        if (resp.ok) {
+          const data = await resp.json();
+          const base64Data = data.predictions?.[0]?.bytesBase64Encoded;
+          if (base64Data) {
+            return `data:image/jpeg;base64,${base64Data}`;
           }
+        } else {
+          console.warn('Google Imagen 3 returned non-OK, using high-speed Flux fallback:', resp.status);
         }
+      } catch (err) {
+        console.warn('Imagen 3 fetch failed, switching to Flux fallback:', err);
       }
-    } catch (e) {
-      console.warn('Could not auto-discover models, using fallback list:', e);
     }
 
-    // Default candidate list: 3.5-flash & 3.8-flash first!
-    return [
-      'gemini-3.5-flash',
-      'gemini-3.8-flash',
-      'gemini-3.5-flash-lite',
-      'gemini-3.8-flash-lite',
-      'gemini-2.5-flash',
-      'gemini-3.1-pro',
-    ];
+    // 2. High-speed Pollinations Flux fallback (100% free, reliable, instant, 0 key required)
+    const cleanPrompt = prompt
+      .replace(/[\n\r]+/g, ' ')
+      .replace(/["']/g, '')
+      .trim()
+      .slice(0, 400);
+
+    const encoded = encodeURIComponent(cleanPrompt);
+    const [width, height] = aspectRatio === '3:4' ? [768, 1024] : [1024, 1024];
+    return `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true&model=flux`;
   }
 
   /**
-   * Sends a single normal-quality camera frame to Google Gemini
-   * to analyze surrounding environment, lighting, subject, and output an optimal bespoke pose wireframe.
-   * Includes automatic retry on 503 (high demand) and fallback across models.
+   * Full AI Director Pipeline:
+   * 1. Analyzes the live camera frame to detect physical scene objects, lighting, and framing.
+   * 2. Formulates a tailored human pose utilizing those objects.
+   * 3. Crafts a tailored photorealistic image generation prompt.
+   * 4. Synthesizes the reference photo via text-to-image AI.
+   * 5. Returns a rich AIPoseSuggestion for the Picture-in-Picture reference card.
    */
-  public async analyzeSceneAndRecommendPose(
-    imageBase64: string,
-    mimeType = 'image/jpeg'
-  ): Promise<{ preset: PosePreset; isAIGenerated: boolean; errorNotice?: string }> {
-    if (!this.hasApiKey()) {
-      console.log('No Gemini API key provided, selecting intelligent contextual preset.');
-      return {
-        preset: this.getIntelligentFallbackPose(),
-        isAIGenerated: false,
-        errorNotice: 'Using Studio AI Director. (Add a Gemini API key in Settings for live vision).',
-      };
+  public async analyzeSceneAndGeneratePose(
+    base64Image: string,
+    mimeType = 'image/jpeg',
+    options?: {
+      facingMode?: 'user' | 'environment';
+      previousTitle?: string;
     }
+  ): Promise<AIPoseSuggestion> {
+    const isFront = options?.facingMode === 'user';
+    const cameraModeDesc = isFront
+      ? 'Front-facing selfie camera (close-up to upper-body portrait distance)'
+      : 'Rear main camera (subject in environment, portrait to full-body)';
 
-    const prompt = `
-You are an expert portrait photographer and creative director.
-Look at this camera viewfinder snapshot.
-1. Scene & Person Analysis:
-   - Identify setting, objects (wall, door, chair, couch, bench, steps, railing, window), lighting, and architecture.
-   - Detect if there is a wall/door/window to lean against, a chair/couch/bench to sit on, or a railing/balcony to lean on.
-2. Pose Archetype Selection:
-   - Pick the best archetype from: "wall_lean", "railing_lean", "seated_chair", "seated_steps", "selfie_hair", "editorial_collar", "hands_hips", "power_portrait", "walking_candid", "general".
-   - If wall/door/window available: choose "wall_lean" (lean back against wall, hands in pockets or relaxed, one leg crossed casually over the other).
-   - If chair/couch/bench available: choose "seated_chair" (sit comfortably, lap flat, knees bent, hands on lap).
-   - If steps/stairs available: choose "seated_steps" (sit on step, knees bent up, elbows on knees).
-   - If railing/balcony available: choose "railing_lean" (lean forearms on railing).
-   - If close-up selfie: choose "selfie_hair" or "editorial_collar".
-   - If open standing: choose "hands_hips", "power_portrait", or "walking_candid".
-   - Provide "leanSide": "left" or "right" depending on where the wall/object is located in the frame.
-   - Provide a catchy pose title ("poseTitle"), a clear actionable direction tip ("directionTip"), and vibe ("vibe").
+    const prompt = `You are a world-class professional photographer and creative pose director.
+Analyze this live camera frame and craft a creative photography pose idea tailored specifically to this scene.
 
-Return ONLY a raw JSON object with this exact structure:
+CAMERA CONTEXT: ${cameraModeDesc}.
+${options?.previousTitle ? `Previous pose suggested was "${options.previousTitle}". Suggest a fresh, different pose idea.` : ''}
+
+CRITICAL REQUIREMENTS:
+1. SCENE OBJECT IDENTIFICATION: Detect specific physical objects, furniture, architecture, or elements in the frame (e.g. "leather armchair", "wooden cafe table", "concrete wall", "staircase steps", "doorway", "coffee mug", "balcony railing", "park grass", "sunlit window").
+2. OBJECT UTILIZATION: The suggested pose MUST actively use or interact with one or more of these detected objects (e.g., sitting on it, leaning against it, propping an arm/foot, holding a prop, or framing against it). If it is a handheld selfie, utilize flattering facial angles, hand-to-face/hair gestures, and visible background elements.
+3. POSE INSTRUCTION: Write clear, friendly step-by-step direction tips for the user on how to position their body, limbs, and head.
+4. IMAGE GENERATION PROMPT: Write a vivid, photorealistic prompt for a text-to-image generator that accurately portrays a stylish person performing this exact pose utilizing the detected scene objects.
+   - Must specify: "A photorealistic photograph of a stylish person [exact pose], interacting with [detected objects], natural flattering lighting, 50mm lens portrait photography, 8k, cinematic, realistic human anatomy".
+
+Output ONLY valid JSON matching this exact schema:
 {
-  "archetype": "wall_lean",
-  "leanSide": "right",
-  "framing": "full_body",
-  "poseTitle": "The Standing Wall Lean",
-  "directionTip": "Stand with your back lightly leaning against the wall, hands in front pockets, one leg crossed casually over the other.",
-  "sceneDescription": "Indoor setting with wall",
-  "vibe": "Effortless & Natural",
-  "landmarks": {
-    "nose": {"x": 0.52, "y": 0.15},
-    "left_shoulder": {"x": 0.59, "y": 0.27},
-    "right_shoulder": {"x": 0.44, "y": 0.27},
-    "left_elbow": {"x": 0.63, "y": 0.41},
-    "right_elbow": {"x": 0.39, "y": 0.41},
-    "left_wrist": {"x": 0.56, "y": 0.53},
-    "right_wrist": {"x": 0.42, "y": 0.53},
-    "left_hip": {"x": 0.54, "y": 0.54},
-    "right_hip": {"x": 0.45, "y": 0.54},
-    "left_knee": {"x": 0.52, "y": 0.72},
-    "right_knee": {"x": 0.44, "y": 0.70},
-    "left_ankle": {"x": 0.48, "y": 0.90},
-    "right_ankle": {"x": 0.43, "y": 0.91}
-  }
-}
-`;
+  "title": "Short catchy pose title (e.g. 'The Cafe Window Lean', 'The Velvet Sofa Recline', 'The Casual Wall Slant')",
+  "vibe": "Short aesthetic vibe (e.g. 'Moody Editorial', 'Warm Coffee Shop', 'Golden Hour Candid')",
+  "directionTip": "2-3 clear, actionable sentences instructing the user how to pose (e.g. 'Sit comfortably on the edge of the sofa, cross your legs casually, rest your left elbow on the armrest, and gaze softly towards the camera.')",
+  "sceneObjects": ["Object 1", "Object 2", "Object 3"],
+  "imagePrompt": "Detailed photorealistic text-to-image prompt showing the person in this pose with the scene objects"
+}`;
 
-    // Determine model list
-    let modelsToTry = await this.discoverAvailableModels();
-    if (this.preferredModel !== 'auto' && !DEPRECATED_MODELS.includes(this.preferredModel)) {
-      modelsToTry = [this.preferredModel, ...modelsToTry.filter((m) => m !== this.preferredModel)];
-    }
+    let parsedResult: {
+      title: string;
+      vibe: string;
+      directionTip: string;
+      sceneObjects: string[];
+      imagePrompt: string;
+    } | null = null;
 
-    let lastError: any = null;
+    if (this.apiKey) {
+      const modelsToTry = [
+        this.preferredModel,
+        'gemini-2.5-flash',
+        'gemini-2.0-flash',
+        'gemini-1.5-flash',
+      ].filter((m, i, arr) => m && arr.indexOf(m) === i);
 
-    // Try models in order, with automatic retry for 503 / 429
-    for (const model of modelsToTry.slice(0, 6)) {
-      if (DEPRECATED_MODELS.includes(model)) continue;
-
-      for (let attempt = 0; attempt < 2; attempt++) {
+      for (const model of modelsToTry) {
         try {
           const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
           const response = await fetch(endpoint, {
@@ -302,460 +193,73 @@ Return ONLY a raw JSON object with this exact structure:
                 {
                   parts: [
                     { text: prompt },
-                    {
-                      inlineData: {
-                        mimeType,
-                        data: imageBase64,
-                      },
-                    },
+                    { inlineData: { mimeType, data: base64Image } },
                   ],
                 },
               ],
               generationConfig: {
-                temperature: 0.3,
-                maxOutputTokens: 1024,
                 responseMimeType: 'application/json',
+                temperature: 0.7,
               },
             }),
           });
 
-          // Handle 503 (High demand) or 429 (Rate limit) with backoff
-          if (response.status === 503 || response.status === 429) {
-            if (attempt === 0) {
-              console.warn(`Model ${model} returned ${response.status} (high demand). Retrying in 1.2s...`);
-              await new Promise((r) => setTimeout(r, 1200));
-              continue; // retry same model
-            }
-            throw new Error(`Google Gemini server busy (${response.status} high traffic).`);
-          }
-
-          // Handle 404 (Discontinued model) - skip to next model
-          if (response.status === 404) {
-            console.warn(`Model ${model} returned 404, skipping to next model...`);
-            this.cachedModels = this.cachedModels.filter((m) => m !== model);
-            lastError = new Error(`Model ${model} returned 404.`);
-            break; // go to next model
-          }
-
-          // Handle invalid API key immediately (no need to try other models if key is invalid)
-          if (response.status === 400 || response.status === 403) {
-            const errText = await response.text();
-            const clean = this.cleanErrorMessage(errText);
-            if (clean.includes('API_KEY_INVALID') || clean.includes('API key not valid')) {
-              throw new Error('Invalid Gemini API key. Please check your key in Settings (⚙️).');
-            }
-          }
-
-          if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`Model ${model} (${response.status}): ${this.cleanErrorMessage(errText)}`);
-          }
+          if (!response.ok) continue;
 
           const data = await response.json();
-          const candidate = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (!candidate) throw new Error('Empty response from model');
+          const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (!rawText) continue;
 
-          const parsed: SceneAnalysisResponse = this.cleanAndParseJSON(candidate);
-          const bespokePreset = this.formatResponseAsPosePreset(parsed, model);
-          return {
-            preset: bespokePreset,
-            isAIGenerated: true,
-          };
-        } catch (err: any) {
-          console.warn(`Model ${model} (attempt ${attempt + 1}) failed:`, err);
-          lastError = err;
-          if (err?.message?.includes('Invalid Gemini API key')) {
-            // Short circuit if key is invalid
+          const match = rawText.match(/\{[\s\S]*\}/);
+          const jsonStr = match ? match[0] : rawText;
+          parsedResult = JSON.parse(jsonStr);
+          if (parsedResult?.title && parsedResult?.imagePrompt) {
             break;
           }
-          break;
+        } catch (e) {
+          console.warn(`Model ${model} analysis failed:`, e);
         }
       }
-
-      if (lastError?.message?.includes('Invalid Gemini API key')) {
-        break;
-      }
     }
 
-    // Clean, human-friendly error explanation
-    const friendlyError = this.formatFriendlyError(lastError);
-    console.error('All Gemini model calls failed:', lastError);
-
-    return {
-      preset: this.getIntelligentFallbackPose(),
-      isAIGenerated: false,
-      errorNotice: friendlyError,
-    };
-  }
-
-  private cleanErrorMessage(raw: string): string {
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed.error?.message) {
-        return parsed.error.message;
-      }
-    } catch {}
-    return raw;
-  }
-
-  private formatFriendlyError(err: any): string {
-    const msg = err?.message || '';
-    if (msg.includes('Invalid Gemini API key') || msg.includes('API_KEY_INVALID') || msg.includes('API key not valid')) {
-      return 'Invalid Gemini API key. Please check or re-paste your key in Settings (⚙️).';
-    }
-    if (msg.includes('503') || msg.includes('high traffic') || msg.includes('high demand')) {
-      return 'Google Gemini is currently experiencing high demand (503). Retrying usually works in a few seconds!';
-    }
-    if (msg.includes('429')) {
-      return 'Gemini API rate limit reached. Please wait a moment and tap Retry.';
-    }
-    if (msg.includes('403') || msg.includes('PERMISSION_DENIED')) {
-      return 'Permission denied for this API key. Ensure Generative Language API is enabled.';
-    }
-    if (msg.includes('404')) {
-      return 'Vision model not found or deprecated. Please test your key in Settings (⚙️).';
-    }
-    return msg ? `Connection: ${msg.slice(0, 80)}` : 'Google API is temporarily unavailable.';
-  }
-
-  private cleanAndParseJSON(raw: string): SceneAnalysisResponse {
-    let text = raw.trim();
-    // Use regex to locate the first outer JSON object {...}
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      return JSON.parse(match[0]);
-    }
-    return JSON.parse(text);
-  }
-
-  /**
-   * Robust Archetype & Posture Classifier:
-   * Inspects model output + semantic keywords across title, tip, and scene description.
-   * Accurately determines the posture archetype and orientation side.
-   */
-  public detectArchetype(data: Partial<SceneAnalysisResponse>): { archetype: PoseArchetype; leanSide: 'left' | 'right' } {
-    const rawArchetype = data.archetype;
-    const combined = `${data.poseTitle || ''} ${data.directionTip || ''} ${data.sceneDescription || ''} ${data.vibe || ''}`.toLowerCase();
-    const leanSide: 'left' | 'right' = data.leanSide === 'left' || /left wall|lean.*left|left side|left shoulder/i.test(combined) ? 'left' : 'right';
-
-    if (rawArchetype && rawArchetype !== 'general') {
-      const validArchetypes: PoseArchetype[] = [
-        'wall_lean', 'railing_lean', 'seated_steps', 'seated_lean',
-        'selfie_hair', 'hands_hips', 'editorial_collar', 'power_portrait',
-        'walking_candid', 'general'
-      ];
-      if (validArchetypes.includes(rawArchetype)) {
-        return { archetype: rawArchetype, leanSide };
-      }
-    }
-
-    if (/stair|steps|curb|staircase/i.test(combined)) {
-      return { archetype: 'seated_steps', leanSide };
-    }
-    if (/chair|couch|sofa|bench|stool|lap|seated/i.test(combined) || data.framing === 'seated') {
-      return { archetype: 'seated_lean', leanSide };
-    }
-    if (/wall|door|window|lean.*wall|cross.*leg|pocket/i.test(combined)) {
-      return { archetype: 'wall_lean', leanSide };
-    }
-    if (/railing|balcony|banister|ledge|counter|balustrade/i.test(combined)) {
-      return { archetype: 'railing_lean', leanSide };
-    }
-    if (/hair|crown|run.*finger|brush.*hair/i.test(combined)) {
-      return { archetype: 'selfie_hair', leanSide };
-    }
-    if (/collar|jaw|chin|neck|touch.*face/i.test(combined)) {
-      return { archetype: 'editorial_collar', leanSide };
-    }
-    if (/hand.*hip|hands.*waist|akimbo|confident stance/i.test(combined)) {
-      return { archetype: 'hands_hips', leanSide };
-    }
-    if (/cross.*arm|folded.*arm|cross.*chest|power portrait/i.test(combined)) {
-      return { archetype: 'power_portrait', leanSide };
-    }
-    if (/walk|stride|step forward|step|in motion/i.test(combined)) {
-      return { archetype: 'walking_candid', leanSide };
-    }
-
-    return { archetype: 'general', leanSide };
-  }
-
-  /**
-   * Synthesizes anatomically sound, verified baseline keypoints for a given archetype and side.
-   * Guarantees that the pose wireframe matches the posture instructions 100% (e.g. crossed legs,
-   * hands in pockets, seated lap, hands on hips).
-   */
-  public synthesizeArchetypeLandmarks(
-    archetype: PoseArchetype,
-    side: 'left' | 'right' = 'right',
-    _framing: 'full_body' | 'upper_body' | 'seated' = 'full_body'
-  ): PoseLandmarks {
-    const isRight = side === 'right';
-
-    // 1. Wall Lean: Leaning back, hands in pockets, one leg casually crossed over the other!
-    if (archetype === 'wall_lean') {
-      const base = DEFAULT_POSES.find((p) => p.id === 'downtown_lean')!.landmarks;
-      if (!isRight) {
-        // Mirror horizontally across x = 0.50
-        const mirrored: PoseLandmarks = {};
-        for (const [key, pt] of Object.entries(base)) {
-          if (!pt) continue;
-          const swappedKey = key.startsWith('left_')
-            ? key.replace('left_', 'right_')
-            : key.startsWith('right_')
-            ? key.replace('right_', 'left_')
-            : key;
-          mirrored[swappedKey as JointName] = { x: Math.round((1.0 - pt.x) * 100) / 100, y: pt.y };
-        }
-        return mirrored;
-      }
-      return { ...base };
-    }
-
-    // 2. Seated Chair / Bench: Lap flat, knees bent forward, hands resting on lap, feet on floor
-    if (archetype === 'seated_lean') {
-      return {
-        nose: { x: 0.50, y: 0.22 },
-        left_shoulder: { x: 0.38, y: 0.36 },
-        right_shoulder: { x: 0.62, y: 0.36 },
-        left_elbow: { x: 0.32, y: 0.50 },
-        right_elbow: { x: 0.68, y: 0.50 },
-        left_wrist: { x: 0.40, y: 0.62 },
-        right_wrist: { x: 0.60, y: 0.62 },
-        left_hip: { x: 0.42, y: 0.64 },
-        right_hip: { x: 0.58, y: 0.64 },
-        left_knee: { x: 0.40, y: 0.76 },
-        right_knee: { x: 0.60, y: 0.76 },
-        left_ankle: { x: 0.42, y: 0.92 },
-        right_ankle: { x: 0.58, y: 0.92 },
-      };
-    }
-
-    // 3. Seated on Steps / Stairs: Knees bent up, elbows on knees, hands under chin
-    if (archetype === 'seated_steps') {
-      return { ...DEFAULT_POSES.find((p) => p.id === 'downtown_steps')!.landmarks };
-    }
-
-    // 4. Railing Lean: Forearms resting on railing
-    if (archetype === 'railing_lean') {
-      return {
-        nose: { x: isRight ? 0.48 : 0.52, y: 0.16 },
-        left_shoulder: { x: isRight ? 0.38 : 0.42, y: isRight ? 0.28 : 0.30 },
-        right_shoulder: { x: isRight ? 0.58 : 0.62, y: isRight ? 0.30 : 0.28 },
-        left_elbow: { x: isRight ? 0.32 : 0.30, y: 0.42 },
-        right_elbow: { x: isRight ? 0.70 : 0.68, y: 0.42 },
-        left_wrist: { x: isRight ? 0.36 : 0.24, y: 0.46 },
-        right_wrist: { x: isRight ? 0.76 : 0.64, y: 0.46 },
-        left_hip: { x: isRight ? 0.42 : 0.46, y: 0.58 },
-        right_hip: { x: isRight ? 0.54 : 0.58, y: 0.58 },
-        left_knee: { x: isRight ? 0.46 : 0.44, y: 0.74 },
-        right_knee: { x: isRight ? 0.54 : 0.56, y: 0.74 },
-        left_ankle: { x: isRight ? 0.47 : 0.43, y: 0.92 },
-        right_ankle: { x: isRight ? 0.53 : 0.57, y: 0.92 },
-      };
-    }
-
-    // 5. Selfie Hair Touch: Hand reaching into hair crown
-    if (archetype === 'selfie_hair') {
-      return { ...DEFAULT_POSES.find((p) => p.id === 'selfie_hair')!.landmarks };
-    }
-
-    // 6. Confident Hands on Hips: Akimbo arms, chest open
-    if (archetype === 'hands_hips') {
-      return { ...DEFAULT_POSES.find((p) => p.id === 'hands_hips')!.landmarks };
-    }
-
-    // 7. Editorial Collarbone: Hand at jaw/collarbone
-    if (archetype === 'editorial_collar') {
-      return { ...DEFAULT_POSES.find((p) => p.id === 'editorial_collar')!.landmarks };
-    }
-
-    // 8. Power Portrait: Crossed folded arms across chest
-    if (archetype === 'power_portrait') {
-      return { ...DEFAULT_POSES.find((p) => p.id === 'power_portrait')!.landmarks };
-    }
-
-    // 9. Walking Candid: One leg forward, one leg back, arms swinging
-    if (archetype === 'walking_candid') {
-      return { ...DEFAULT_POSES.find((p) => p.id === 'golden_hour_candid')!.landmarks };
-    }
-
-    // 10. General Relaxed Standing (Contrapposto with natural weight shift)
-    return {
-      nose: { x: 0.50, y: 0.16 },
-      left_shoulder: { x: 0.60, y: 0.28 },
-      right_shoulder: { x: 0.40, y: 0.28 },
-      left_elbow: { x: 0.64, y: 0.44 },
-      right_elbow: { x: 0.36, y: 0.44 },
-      left_wrist: { x: 0.60, y: 0.60 },
-      right_wrist: { x: 0.40, y: 0.60 },
-      left_hip: { x: 0.56, y: 0.56 },
-      right_hip: { x: 0.44, y: 0.56 },
-      left_knee: { x: 0.56, y: 0.74 },
-      right_knee: { x: 0.44, y: 0.74 },
-      left_ankle: { x: 0.56, y: 0.92 },
-      right_ankle: { x: 0.44, y: 0.92 },
-    };
-  }
-
-  /**
-   * Biomechanical Invariant Validator:
-   * Inspects keypoints to ensure human anatomy rules:
-   * 1. Head (nose.y) must always be higher than shoulders (shoulder.y)
-   * 2. Shoulders must always be higher than hips
-   * 3. Hips must always be higher than knees
-   * 4. Knees must always be higher than ankles
-   * If the pose is seated, ensures lap and bent knees are correctly shaped!
-   */
-  public sanitizeAndValidateLandmarks(raw?: PoseLandmarks, isSeated = false): PoseLandmarks {
-    const defaultStanding: PoseLandmarks = {
-      nose: { x: 0.50, y: 0.18 },
-      left_shoulder: { x: 0.41, y: 0.30 },
-      right_shoulder: { x: 0.59, y: 0.30 },
-      left_elbow: { x: 0.35, y: 0.44 },
-      right_elbow: { x: 0.65, y: 0.44 },
-      left_wrist: { x: 0.38, y: 0.58 },
-      right_wrist: { x: 0.62, y: 0.58 },
-      left_hip: { x: 0.44, y: 0.58 },
-      right_hip: { x: 0.56, y: 0.58 },
-      left_knee: { x: 0.45, y: 0.74 },
-      right_knee: { x: 0.55, y: 0.74 },
-      left_ankle: { x: 0.46, y: 0.91 },
-      right_ankle: { x: 0.54, y: 0.91 },
-    };
-
-    if (!raw) return defaultStanding;
-
-    const valid: PoseLandmarks = {};
-    const allJoints: (keyof PoseLandmarks)[] = [
-      'nose', 'left_shoulder', 'right_shoulder',
-      'left_elbow', 'right_elbow', 'left_wrist', 'right_wrist',
-      'left_hip', 'right_hip', 'left_knee', 'right_knee',
-      'left_ankle', 'right_ankle'
-    ];
-
-    for (const j of allJoints) {
-      const pt = raw[j];
-      if (pt && typeof pt.x === 'number' && typeof pt.y === 'number' && !isNaN(pt.x) && !isNaN(pt.y)) {
-        valid[j] = {
-          x: Math.max(0.06, Math.min(0.94, pt.x)),
-          y: Math.max(0.06, Math.min(0.96, pt.y)),
+    // High quality contextual fallback if Gemini is offline / no key
+    if (!parsedResult) {
+      if (isFront) {
+        parsedResult = {
+          title: 'The Golden Hour Selfie',
+          vibe: 'Warm Glow & Gentle Smile',
+          directionTip: 'Hold your phone slightly above eye level at a 45-degree angle. Tilt your chin up slightly and touch your fingertips softly to your collarbone.',
+          sceneObjects: ['Soft Ambient Lighting', 'Phone Camera'],
+          imagePrompt: 'A photorealistic close-up selfie portrait of a stylish smiling person holding their phone at a gentle angle, touching their collarbone, warm golden lighting, 35mm lens, high resolution photograph',
         };
       } else {
-        valid[j] = { ...defaultStanding[j]! };
+        parsedResult = {
+          title: 'The Ambient Room Portrait',
+          vibe: 'Relaxed Lifestyle & Clean Lines',
+          directionTip: 'Find the nearest chair or wall in your room. Lean your upper body casually against it, shift your weight to your back foot, and look toward the light source.',
+          sceneObjects: ['Furniture / Room Wall', 'Ambient Light'],
+          imagePrompt: 'A photorealistic full-shot photograph of a person leaning casually against modern room furniture, natural relaxed posture, soft cinematic ambient lighting, professional portrait photography',
+        };
       }
     }
 
-    // Seated chair pose synthesis
-    if (isSeated) {
-      const midShX = (valid.left_shoulder!.x + valid.right_shoulder!.x) / 2;
-      const shWidth = Math.max(0.16, Math.abs(valid.right_shoulder!.x - valid.left_shoulder!.x));
-      const hipWidth = shWidth * 0.85;
-
-      const hipY = Math.max(0.52, Math.min(0.68, ((valid.left_hip?.y ?? 0.62) + (valid.right_hip?.y ?? 0.62)) / 2));
-      const hipCenterX = (valid.left_hip && valid.right_hip)
-        ? (valid.left_hip.x + valid.right_hip.x) / 2
-        : midShX;
-
-      valid.left_hip = {
-        x: Math.max(0.08, hipCenterX - hipWidth / 2),
-        y: hipY
-      };
-      valid.right_hip = {
-        x: Math.min(0.92, hipCenterX + hipWidth / 2),
-        y: hipY
-      };
-
-      // Lap & knees extending forward / slightly outward
-      valid.left_knee = {
-        x: valid.left_knee && valid.left_knee.y > hipY ? valid.left_knee.x : valid.left_hip.x - 0.02,
-        y: valid.left_knee && valid.left_knee.y > hipY ? Math.min(0.80, valid.left_knee.y) : Math.min(0.80, hipY + 0.13),
-      };
-      valid.right_knee = {
-        x: valid.right_knee && valid.right_knee.y > hipY ? valid.right_knee.x : valid.right_hip.x + 0.02,
-        y: valid.right_knee && valid.right_knee.y > hipY ? Math.min(0.80, valid.right_knee.y) : Math.min(0.80, hipY + 0.13),
-      };
-
-      // Calves & feet to floor
-      valid.left_ankle = {
-        x: valid.left_ankle && valid.left_ankle.y > valid.left_knee.y ? valid.left_ankle.x : valid.left_knee.x,
-        y: Math.max(0.86, valid.left_ankle?.y ?? 0.92),
-      };
-      valid.right_ankle = {
-        x: valid.right_ankle && valid.right_ankle.y > valid.right_knee.y ? valid.right_ankle.x : valid.right_knee.x,
-        y: Math.max(0.86, valid.right_ankle?.y ?? 0.92),
-      };
-
-      // Hands resting on lap / chair arm
-      if (!valid.left_wrist || valid.left_wrist.y > 0.82) {
-        valid.left_wrist = { x: valid.left_hip.x + 0.02, y: hipY + 0.02 };
-      }
-      if (!valid.right_wrist || valid.right_wrist.y > 0.82) {
-        valid.right_wrist = { x: valid.right_hip.x - 0.02, y: hipY + 0.02 };
-      }
-      if (!valid.left_elbow) {
-        valid.left_elbow = { x: valid.left_shoulder!.x - 0.05, y: (valid.left_shoulder!.y + hipY) / 2 };
-      }
-      if (!valid.right_elbow) {
-        valid.right_elbow = { x: valid.right_shoulder!.x + 0.05, y: (valid.right_shoulder!.y + hipY) / 2 };
-      }
-    }
-
-    // Biomechanical gravity checks
-    const avgShY = (valid.left_shoulder!.y + valid.right_shoulder!.y) / 2;
-    if (valid.nose!.y >= avgShY) {
-      valid.nose!.y = Math.max(0.12, avgShY - 0.12);
-    }
-
-    const avgHipY = (valid.left_hip!.y + valid.right_hip!.y) / 2;
-    if (avgShY >= avgHipY) {
-      valid.left_shoulder!.y = Math.max(0.24, avgHipY - 0.24);
-      valid.right_shoulder!.y = Math.max(0.24, avgHipY - 0.24);
-    }
-
-    if (valid.left_knee && valid.left_knee.y < valid.left_hip!.y) {
-      valid.left_knee.y = valid.left_hip!.y + 0.14;
-    }
-    if (valid.right_knee && valid.right_knee.y < valid.right_hip!.y) {
-      valid.right_knee.y = valid.right_hip!.y + 0.14;
-    }
-
-    return valid;
-  }
-
-  private formatResponseAsPosePreset(data: SceneAnalysisResponse, modelUsed: string): PosePreset {
-    const { archetype, leanSide } = this.detectArchetype(data);
-    const shortModelName = modelUsed.replace('gemini-', '').toUpperCase();
-
-    // Synthesize verified, anatomically accurate landmarks matching the exact posture
-    // (e.g. crossed legs for wall lean, hands on lap for chair sit, akimbo for hands on hips)
-    const verifiedLandmarks = this.synthesizeArchetypeLandmarks(archetype, leanSide, data.framing);
-
-    const framing = (archetype === 'seated_lean' || archetype === 'seated_steps')
-      ? 'seated'
-      : (archetype === 'selfie_hair' || archetype === 'editorial_collar')
-      ? 'upper_body'
-      : (data.framing || 'full_body');
+    // Step 2: Generate the Reference Photo from the Prompt!
+    const imageUrl = await this.generateImageFromPrompt(
+      parsedResult.imagePrompt,
+      isFront ? '3:4' : '3:4'
+    );
 
     return {
-      id: `ai_${Date.now()}`,
-      title: data.poseTitle || 'Bespoke AI Pose',
-      vibe: data.vibe || 'AI Scene Director',
-      category: 'Editorial',
-      framing,
-      archetype,
-      leanSide,
-      directionTip: data.directionTip || 'Follow the glowing silhouette guide.',
-      reasoning: data.sceneDescription ? `${data.sceneDescription} [${shortModelName}]` : `Bespoke pose direct from ${shortModelName}`,
-      landmarks: verifiedLandmarks,
+      id: `ai_pose_${Date.now()}`,
+      title: parsedResult.title,
+      vibe: parsedResult.vibe,
+      directionTip: parsedResult.directionTip,
+      sceneObjects: parsedResult.sceneObjects || [],
+      imagePrompt: parsedResult.imagePrompt,
+      referenceImageUrl: imageUrl,
+      createdAt: Date.now(),
+      cameraFacing: options?.facingMode || 'environment',
     };
-  }
-
-  private fallbackIndex = 0;
-  public getIntelligentFallbackPose(): PosePreset {
-    const preset = DEFAULT_POSES[this.fallbackIndex % DEFAULT_POSES.length];
-    this.fallbackIndex++;
-    return preset;
   }
 }
 

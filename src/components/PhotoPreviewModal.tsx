@@ -3,30 +3,22 @@ import {
   X,
   Download,
   Share2,
-  CheckCircle2,
-  Layers,
-  Sparkles,
   Camera,
-  Check,
-  HardDrive,
   FlipHorizontal,
 } from 'lucide-react';
-import type { CapturedPhoto, PosePreset } from '../types/camera';
-import { SkeletalOverlay } from './SkeletalOverlay';
+import type { CapturedPhoto, AIPoseSuggestion } from '../types/camera';
 
 interface PhotoPreviewModalProps {
   photo: CapturedPhoto | null;
   onClose: () => void;
-  currentPose: PosePreset | null;
+  currentPose?: AIPoseSuggestion | null;
 }
 
 export const PhotoPreviewModal: React.FC<PhotoPreviewModalProps> = ({
   photo,
   onClose,
-  currentPose,
 }) => {
   const [useStamped, setUseStamped] = useState(true);
-  const [showOverlay, setShowOverlay] = useState(false);
   const [zoomLevel, setZoomLevel] = useState<1 | 2>(1);
   const [isFlipped, setIsFlipped] = useState(false);
 
@@ -103,7 +95,7 @@ export const PhotoPreviewModal: React.FC<PhotoPreviewModalProps> = ({
         );
         await navigator.share({
           title: `Photo by AI Pose Cam — ${photo.megapixelsFormatted}`,
-          text: `Captured with ${photo.cameraUsed} (${photo.width}x${photo.height}). AI Match: ${photo.alignmentScore}%!`,
+          text: `Captured with ${photo.cameraUsed} (${photo.width}x${photo.height}). Pose: ${photo.poseTitle}`,
           files: [file],
         });
       } catch (err) {
@@ -113,7 +105,6 @@ export const PhotoPreviewModal: React.FC<PhotoPreviewModalProps> = ({
       handleDownload();
     }
   };
-
 
   const formattedFileSize =
     photo.fileSizeBytes > 1024 * 1024
@@ -136,53 +127,25 @@ export const PhotoPreviewModal: React.FC<PhotoPreviewModalProps> = ({
             <span>{photo.cameraUsed}</span>
             <span className="text-gray-500">•</span>
             <span className="font-mono text-gray-400">
-              {photo.width} × {photo.height}
+              {photo.width} × {photo.height} ({formattedFileSize})
             </span>
           </div>
         </div>
 
-        {/* Action controls */}
+        {/* View Controls & Close */}
         <div className="flex items-center gap-2">
-          {/* Watermark Stamp Toggle */}
-          <button
-            onClick={() => setUseStamped(!useStamped)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-              useStamped
-                ? 'bg-emerald-500 text-black font-bold shadow-md shadow-emerald-500/20'
-                : 'glass-pill text-white/80 hover:text-white'
-            }`}
-            title="Toggle burned-in Megapixels & Camera watermark on photo"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>{useStamped ? 'MP Stamp: ON' : 'MP Stamp: OFF'}</span>
-          </button>
-
-          {/* Flip Photo Horizontal Toggle */}
+          {/* Flip Horizontal Preview (Helpful for front selfies) */}
           <button
             onClick={() => setIsFlipped(!isFlipped)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
               isFlipped
-                ? 'bg-amber-500 text-black font-bold shadow-md shadow-amber-500/20'
+                ? 'bg-amber-500 text-black font-semibold'
                 : 'glass-pill text-white/80 hover:text-white'
             }`}
-            title="Flip / Mirror photo horizontally"
+            title="Mirror horizontally"
           >
             <FlipHorizontal className="w-3.5 h-3.5" />
             <span className="hidden xs:inline">{isFlipped ? 'Flipped' : 'Flip'}</span>
-          </button>
-
-          {/* AI Guide Wireframe Overlay */}
-          <button
-            onClick={() => setShowOverlay(!showOverlay)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-              showOverlay
-                ? 'bg-sky-500 text-black font-semibold'
-                : 'glass-pill text-white/80 hover:text-white'
-            }`}
-            title="Toggle AI Pose Skeleton Overlay"
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span className="hidden xs:inline">Guide</span>
           </button>
 
           <button
@@ -209,33 +172,13 @@ export const PhotoPreviewModal: React.FC<PhotoPreviewModalProps> = ({
               isFlipped ? '-scale-x-100' : ''
             }`}
           />
-
-
-          {/* AI Skeleton Overlay on captured image */}
-          {showOverlay && currentPose && (
-            <div className="absolute inset-0 rounded-xl overflow-hidden pointer-events-none">
-              <SkeletalOverlay
-                targetLandmarks={currentPose.landmarks}
-                liveLandmarks={null}
-                alignment={{
-                  score: photo.alignmentScore,
-                  isAligned: photo.alignmentScore >= 80,
-                  jointErrors: {},
-                  primaryFeedback: 'Target Pose Overlay',
-                  alignedJointsCount: 0,
-                  totalJointsCount: 0,
-                }}
-                opacity={0.85}
-              />
-            </div>
-          )}
         </div>
       </div>
 
       {/* 3. Bottom Metadata & Action Bar */}
       <div className="p-4 glass-panel border-t border-white/10 flex flex-col gap-3 safe-area-inset">
         {/* Info Grid showing exact camera and sensor specs */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
           <div className="glass-pill p-2 rounded-xl">
             <div className="text-gray-400 text-[10px] uppercase tracking-wider">Actual Megapixels</div>
             <div className="font-extrabold text-emerald-400 text-sm font-mono">
@@ -258,56 +201,56 @@ export const PhotoPreviewModal: React.FC<PhotoPreviewModalProps> = ({
           </div>
 
           <div className="glass-pill p-2 rounded-xl">
-            <div className="text-gray-400 text-[10px] uppercase tracking-wider">File Size</div>
-            <div className="font-semibold text-gray-200 font-mono flex items-center justify-center gap-1">
-              <HardDrive className="w-3 h-3 text-gray-400" />
-              <span>{formattedFileSize}</span>
-            </div>
-          </div>
-
-          <div className="glass-pill p-2 rounded-xl col-span-2 sm:col-span-1">
-            <div className="text-gray-400 text-[10px] uppercase tracking-wider">AI Alignment</div>
-            <div className="font-semibold text-emerald-400 flex items-center justify-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>{photo.alignmentScore}% Match</span>
+            <div className="text-gray-400 text-[10px] uppercase tracking-wider">Pose Reference</div>
+            <div className="font-semibold text-amber-300 truncate">
+              {photo.poseTitle}
             </div>
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2">
-          {/* Primary Download Button */}
-          <button
-            onClick={() => handleDownload(useStamped)}
-            className="flex-1 py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-98 transition-all text-black font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
-          >
-            <Download className="w-4 h-4 stroke-[2.5]" />
-            <span>
-              {useStamped
-                ? `Download Photo (${photo.megapixelsFormatted} Stamp)`
-                : `Download Clean Raw Photo (${photo.megapixelsFormatted})`}
-            </span>
-          </button>
+        {/* Action Buttons Row */}
+        <div className="flex items-center justify-between gap-2 pt-1">
+          {/* Watermark toggle */}
+          <div className="flex items-center gap-1.5 bg-black/40 p-1 rounded-xl border border-white/10">
+            <button
+              onClick={() => setUseStamped(true)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                useStamped
+                  ? 'bg-emerald-500 text-black font-semibold shadow-sm'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              🏷️ With Specs Stamp
+            </button>
+            <button
+              onClick={() => setUseStamped(false)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                !useStamped
+                  ? 'bg-white/20 text-white font-semibold shadow-sm'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Pure Photo
+            </button>
+          </div>
 
-          {/* Alternate Download Button */}
-          <button
-            onClick={() => handleDownload(!useStamped)}
-            className="hidden sm:flex py-3 px-3.5 rounded-xl glass-pill hover:bg-white/10 active:scale-98 transition-all text-white/90 text-xs font-semibold items-center gap-1.5"
-            title={useStamped ? 'Download Raw Unstamped Photo' : 'Download Photo with MP Watermark'}
-          >
-            <Check className="w-3.5 h-3.5 text-emerald-400" />
-            <span>{useStamped ? 'Download Raw' : 'Download Stamped'}</span>
-          </button>
-
-          {'share' in navigator && (
+          <div className="flex items-center gap-2">
             <button
               onClick={handleShare}
-              className="py-3 px-4 rounded-xl glass-pill hover:bg-white/10 active:scale-98 transition-all text-white font-semibold text-sm flex items-center justify-center gap-2"
-              title="Share photo"
+              className="px-4 py-2.5 rounded-xl glass-pill text-white hover:bg-white/10 active:scale-95 transition-all text-xs font-semibold flex items-center gap-1.5"
             >
               <Share2 className="w-4 h-4" />
+              <span>Share</span>
             </button>
-          )}
+
+            <button
+              onClick={() => handleDownload()}
+              className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs flex items-center gap-1.5 active:scale-95 transition-all shadow-lg shadow-emerald-500/20"
+            >
+              <Download className="w-4 h-4" />
+              <span>Save HD Photo</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
