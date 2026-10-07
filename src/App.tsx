@@ -38,6 +38,8 @@ export const App: React.FC = () => {
 
   // Dynamic AI Director & Pose Generation State
   const [currentPose, setCurrentPose] = useState<AIPoseSuggestion>(WELCOME_POSE);
+  const [poseHistory, setPoseHistory] = useState<string[]>([]);
+  const varietyCounterRef = useRef<number>(0);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiNotice, setAiNotice] = useState<{ type: 'success' | 'warn'; text: string } | null>(null);
 
@@ -103,6 +105,12 @@ export const App: React.FC = () => {
     triggerHaptic('medium');
 
     try {
+      varietyCounterRef.current += 1;
+      const history = [...poseHistory];
+      if (currentPose?.title && !history.includes(currentPose.title)) {
+        history.push(currentPose.title);
+      }
+
       // Capture frame for multimodal LLM inspection
       const frame = cameraService.captureAnalysisFrame(videoRef.current);
       const isFront = sensorInfo?.facingMode === 'user';
@@ -112,11 +120,13 @@ export const App: React.FC = () => {
         frame.mimeType,
         {
           facingMode: isFront ? 'user' : 'environment',
-          previousTitle: currentPose?.title,
+          previousTitles: history,
+          varietyIndex: varietyCounterRef.current,
         }
       );
 
       setCurrentPose(newPose);
+      setPoseHistory((prev) => [newPose.title, ...prev.filter((t) => t !== newPose.title).slice(0, 15)]);
       triggerHaptic('heavy');
 
       const objectsMentioned =
@@ -124,9 +134,16 @@ export const App: React.FC = () => {
           ? ` utilizing ${newPose.sceneObjects.slice(0, 2).join(' & ')}`
           : '';
 
+      const engineLabel =
+        newPose.generationEngine === 'gemini_vision'
+          ? ' (Gemini Vision AI)'
+          : newPose.generationEngine === 'free_ai'
+          ? ' (Free AI Engine)'
+          : ' (Creative Director)';
+
       setAiNotice({
         type: 'success',
-        text: `✨ Generated "${newPose.title}"${objectsMentioned}! Check reference card.`,
+        text: `✨ Generated "${newPose.title}"${engineLabel}${objectsMentioned}! Check reference card.`,
       });
 
       // Confetti burst for creative inspiration
@@ -152,7 +169,7 @@ export const App: React.FC = () => {
     } finally {
       setIsAnalyzing(false);
     }
-  }, [isAnalyzing, sensorInfo?.facingMode, currentPose?.title]);
+  }, [isAnalyzing, sensorInfo?.facingMode, currentPose?.title, poseHistory]);
 
   const [isCapturingState, setIsCapturingState] = useState(false);
   const isCapturingRef = useRef(false);

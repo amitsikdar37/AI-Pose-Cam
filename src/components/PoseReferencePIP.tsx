@@ -16,6 +16,11 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({
 }) => {
   const [isMinimized, setIsMinimized] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
+
+  useEffect(() => {
+    setImageLoaded(false);
+  }, [currentPose?.referenceImageUrl]);
 
   // Free-floating draggable coordinates
   const [pos, setPos] = useState<{ x: number; y: number }>(() => {
@@ -160,12 +165,23 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({
 
           {/* Reference Image or Fallback */}
           {hasPhoto ? (
-            <img
-              src={currentPose.referenceImageUrl}
-              alt={currentPose.title}
-              draggable={false}
-              className="w-full h-full object-cover pointer-events-none select-none"
-            />
+            <>
+              {!imageLoaded && !isAnalyzing && (
+                <div className="absolute inset-0 z-20 bg-black/60 backdrop-blur-xs flex flex-col items-center justify-center p-2 text-center">
+                  <RefreshCw className="w-5 h-5 text-emerald-400 animate-spin mb-1" />
+                  <span className="text-[9px] font-medium text-gray-300">Loading Photo...</span>
+                </div>
+              )}
+              <img
+                src={currentPose.referenceImageUrl}
+                alt={currentPose.title}
+                draggable={false}
+                onLoad={() => setImageLoaded(true)}
+                className={`w-full h-full object-cover pointer-events-none select-none transition-opacity duration-300 ${
+                  imageLoaded ? 'opacity-100' : 'opacity-0'
+                }`}
+              />
+            </>
           ) : (
             <div className="w-full h-full flex flex-col items-center justify-center p-2 text-center bg-gradient-to-br from-emerald-950/70 via-black to-zinc-950 pointer-events-none select-none">
               <Sparkles className="w-6 h-6 text-emerald-400 mb-1 animate-pulse" />
@@ -247,6 +263,16 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({
                 <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-emerald-400/20 text-emerald-300 border border-emerald-400/30">
                   {currentPose.vibe}
                 </span>
+                {currentPose.generationEngine === 'gemini_vision' && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-400/30">
+                    Gemini Vision
+                  </span>
+                )}
+                {currentPose.generationEngine === 'free_ai' && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-400/30">
+                    Free AI
+                  </span>
+                )}
               </div>
               <button
                 onClick={() => setIsExpanded(false)}
