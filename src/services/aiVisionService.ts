@@ -147,13 +147,13 @@ const SELFIE_ARCHETYPES: DiversePoseArchetype[] = [
 
 export class AIVisionService {
   private apiKey: string = '';
-  private preferredModel: string = 'gemini-1.5-flash';
+  private preferredModel: string = 'gemini-1.5-pro';
 
   constructor() {
     this.apiKey = this.sanitizeApiKey(
       localStorage.getItem(API_KEY_STORAGE) || (import.meta as any).env?.VITE_GEMINI_API_KEY || ''
     );
-    this.preferredModel = localStorage.getItem(MODEL_PREF_STORAGE) || 'gemini-1.5-flash';
+    this.preferredModel = localStorage.getItem(MODEL_PREF_STORAGE) || 'gemini-1.5-pro';
   }
 
   public sanitizeApiKey(key: string): string {
@@ -335,9 +335,9 @@ Output ONLY valid JSON matching this schema:
     if (this.apiKey) {
       const modelsToTry = [
         this.preferredModel,
-        'gemini-1.5-flash',
-        'gemini-2.0-flash',
         'gemini-1.5-pro',
+        'gemini-2.0-flash',
+        'gemini-1.5-flash',
       ].filter((m, i, arr) => m && arr.indexOf(m) === i);
 
       for (const model of modelsToTry) {

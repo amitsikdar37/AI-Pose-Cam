@@ -161,23 +161,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {/* Model Selection */}
               <div className="pt-1">
                 <label className="text-[11px] font-semibold text-gray-400 block mb-1">Vision & Prompt Model</label>
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-3 gap-1.5">
                   {[
-                    { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash', badge: 'Recommended' },
-                    { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', badge: 'Next-Gen' },
+                    { id: 'gemini-1.5-pro', label: '1.5 Pro', badge: 'Pro Vision' },
+                    { id: 'gemini-2.0-flash', label: '2.0 Flash', badge: 'Next-Gen' },
+                    { id: 'gemini-1.5-flash', label: '1.5 Flash', badge: 'Fast' },
                   ].map((m) => (
                     <button
                       key={m.id}
                       type="button"
                       onClick={() => setSelectedModel(m.id)}
-                      className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border flex items-center justify-between transition-colors ${
+                      className={`px-2 py-1.5 rounded-lg text-xs font-medium border flex flex-col items-center justify-center transition-colors ${
                         selectedModel === m.id
                           ? 'bg-emerald-500/20 border-emerald-500/80 text-emerald-300'
                           : 'bg-black/40 border-white/10 text-gray-400 hover:text-white'
                       }`}
                     >
-                      <span>{m.label}</span>
-                      <span className="text-[9px] opacity-70 font-mono">{m.badge}</span>
+                      <span className="font-semibold">{m.label}</span>
+                      <span className="text-[9px] opacity-75 font-mono">{m.badge}</span>
                     </button>
                   ))}
                 </div>
