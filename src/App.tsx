@@ -10,7 +10,6 @@ import type {
 
 import { WELCOME_POSE } from './data/defaultPoses';
 import { cameraService } from './services/cameraService';
-import { poseDetectionService } from './services/poseDetectionService';
 import { aiVisionService } from './services/aiVisionService';
 import { playShutterSound, triggerHaptic, playCountdownBeep } from './utils/audioHaptics';
 import { createStampedPhoto } from './utils/watermark';
@@ -18,14 +17,10 @@ import { CameraHUD } from './components/CameraHUD';
 import { PhotoPreviewModal } from './components/PhotoPreviewModal';
 import { SettingsModal } from './components/SettingsModal';
 import { PoseReferencePIP } from './components/PoseReferencePIP';
-import { useDeviceOrientation } from './hooks/useDeviceOrientation';
 
 export const App: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
-
-  // Automatic Device Orientation Tracking
-  const { angle: orientationAngle, cycleOrientation } = useDeviceOrientation();
 
   // Camera & Sensor State
   const [sensorInfo, setSensorInfo] = useState<CameraSensorInfo | null>(null);
@@ -49,17 +44,12 @@ export const App: React.FC = () => {
   const [showGrid, setShowGrid] = useState(false);
   const [viewfinderMode, setViewfinderMode] = useState<'wide' | 'cover'>('wide');
 
-  // Advanced Smartphone Selfie Shutter Modes
+  // Smartphone Shutter & Timer Modes
   const [timerDuration, setTimerDuration] = useState<0 | 3 | 5 | 10>(0);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [countdownReason, setCountdownReason] = useState<string | null>(null);
   const [tapToCapture, setTapToCapture] = useState<boolean>(true);
-  const [palmCapture, setPalmCapture] = useState<boolean>(true);
-  const [voiceCapture, setVoiceCapture] = useState<boolean>(false);
-
   const countdownIntervalRef = useRef<number | null>(null);
-  const lastPalmTriggerTimeRef = useRef<number>(0);
-  const palmHoldStartRef = useRef<number | null>(null);
 
   // Captured Photos History
   const [capturedPhotos, setCapturedPhotos] = useState<CapturedPhoto[]>([]);
@@ -75,11 +65,6 @@ export const App: React.FC = () => {
       const info = await cameraService.startCamera(videoRef.current, 'environment');
       setSensorInfo(info);
       setCameraLoading(false);
-
-      // Initialize background gesture detector for optional palm shutter
-      poseDetectionService.initialize().catch((err) => {
-        console.warn('Gesture init warning:', err);
-      });
     } catch (err: any) {
       console.error('Camera startup error:', err);
       setCameraError(err?.message || 'Could not access camera. Please allow camera permissions.');
@@ -274,112 +259,7 @@ export const App: React.FC = () => {
     [timerDuration, handleCapture, cancelCountdown]
   );
 
-  // 5. Palm Gesture Detection for Front Camera (Raised Palm starts 3s Countdown)
-  useEffect(() => {
-    if (!palmCapture || isCapturingRef.current || countdown !== null || showPreview) {
-      palmHoldStartRef.current = null;
-      return;
-    }
 
-    let intervalId: number;
-    const checkGesture = () => {
-      const video = videoRef.current;
-      if (video && video.readyState >= 2) {
-        const now = Date.now();
-        if (now - lastPalmTriggerTimeRef.current < 4000) return;
-
-        const isPalmRaised = poseDetectionService.detectPalmRaised(video, now);
-        if (isPalmRaised) {
-          if (!palmHoldStartRef.current) {
-            palmHoldStartRef.current = now;
-          } else if (now - palmHoldStartRef.current > 400) {
-            lastPalmTriggerTimeRef.current = now;
-            palmHoldStartRef.current = null;
-            triggerShutter(3, '✋ Palm Detected!');
-          }
-        } else {
-          palmHoldStartRef.current = null;
-        }
-      }
-    };
-
-    intervalId = window.setInterval(checkGesture, 200);
-    return () => clearInterval(intervalId);
-  }, [palmCapture, countdown, showPreview, triggerShutter]);
-
-  // 6. Voice Shutter (Web Speech API: Say "Cheese" / "Smile" to Snap)
-  useEffect(() => {
-    if (!voiceCapture || showPreview) return;
-
-    const SpeechRecClass =
-      (window as unknown as { SpeechRecognition?: any; webkitSpeechRecognition?: any })
-        .SpeechRecognition ||
-      (window as unknown as { webkitSpeechRecognition?: any }).webkitSpeechRecognition;
-
-    if (!SpeechRecClass) {
-      setAiNotice({
-        type: 'warn',
-        text: 'Voice Shutter not supported in this browser. Please use Chrome.',
-      });
-      setVoiceCapture(false);
-      return;
-    }
-
-    let recognition: any = null;
-    let isSubscribed = true;
-
-    try {
-      recognition = new SpeechRecClass();
-      recognition.continuous = true;
-      recognition.interimResults = false;
-      recognition.lang = 'en-US';
-
-      recognition.onresult = (event: any) => {
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const phrase = event.results[i][0]?.transcript?.trim().toLowerCase() || '';
-          if (
-            phrase.includes('cheese') ||
-            phrase.includes('smile') ||
-            phrase.includes('click') ||
-            phrase.includes('snap') ||
-            phrase.includes('photo')
-          ) {
-            triggerShutter(1, `🎙️ Heard "${phrase}"!`);
-            break;
-          }
-        }
-      };
-
-      recognition.onerror = () => {
-        setVoiceCapture(false);
-      };
-
-      recognition.onend = () => {
-        if (isSubscribed && voiceCapture) {
-          try {
-            recognition.start();
-          } catch {}
-        }
-      };
-
-      recognition.start();
-      setAiNotice({
-        type: 'success',
-        text: '🎙️ Voice Shutter Active! Say "Cheese" or "Smile" to snap!',
-      });
-    } catch {
-      setVoiceCapture(false);
-    }
-
-    return () => {
-      isSubscribed = false;
-      if (recognition) {
-        try {
-          recognition.abort();
-        } catch {}
-      }
-    };
-  }, [voiceCapture, showPreview, triggerShutter]);
 
   // 7. Hardware Keys: Volume Up/Down, Spacebar, Enter
   useEffect(() => {
@@ -489,7 +369,7 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="relative w-screen h-screen bg-black overflow-hidden select-none font-sans flex flex-col justify-between">
+    <div className="fixed inset-0 w-full h-[100dvh] bg-black overflow-hidden select-none font-sans flex flex-col justify-between">
       {/* 1. Live Optical Video Stream Viewfinder */}
       <div
         className="relative w-full h-full flex items-center justify-center overflow-hidden cursor-crosshair"
@@ -624,21 +504,9 @@ export const App: React.FC = () => {
           setTapToCapture((prev) => !prev);
           triggerHaptic('light');
         }}
-        palmCapture={palmCapture}
-        onTogglePalmCapture={() => {
-          setPalmCapture((prev) => !prev);
-          triggerHaptic('light');
-        }}
-        voiceCapture={voiceCapture}
-        onToggleVoiceCapture={() => {
-          setVoiceCapture((prev) => !prev);
-          triggerHaptic('light');
-        }}
         countdown={countdown}
         countdownReason={countdownReason}
         onCancelCountdown={cancelCountdown}
-        orientationAngle={orientationAngle}
-        onCycleOrientation={cycleOrientation}
       />
 
       {/* 8. Floating Draggable Picture-In-Picture Reference Card */}
