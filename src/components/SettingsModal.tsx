@@ -10,6 +10,7 @@ import {
   Eye,
   EyeOff,
   Clipboard,
+  Sparkles,
 } from 'lucide-react';
 import type { CameraSensorInfo, ResolutionMode } from '../types/camera';
 import { aiVisionService } from '../services/aiVisionService';
@@ -26,7 +27,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSetResolutionMode,
 }) => {
   const [apiKeyInput, setApiKeyInput] = useState<string>(aiVisionService.getApiKey());
+  const [hfTokenInput, setHfTokenInput] = useState<string>(aiVisionService.getHfToken());
+  const [pollinationsKeyInput, setPollinationsKeyInput] = useState<string>(aiVisionService.getPollinationsKey());
   const [showKey, setShowKey] = useState(false);
+  const [showHfKey, setShowHfKey] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string>(aiVisionService.getPreferredModel());
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
@@ -36,6 +40,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const cleaned = aiVisionService.sanitizeApiKey(apiKeyInput);
     setApiKeyInput(cleaned);
     aiVisionService.setApiKey(cleaned);
+    aiVisionService.setHfToken(hfTokenInput.trim());
+    aiVisionService.setPollinationsKey(pollinationsKeyInput.trim());
     aiVisionService.setPreferredModel(selectedModel);
     setSavedSuccess(true);
     setTestResult(null);
@@ -46,6 +52,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const cleaned = aiVisionService.sanitizeApiKey(apiKeyInput);
     setApiKeyInput(cleaned);
     aiVisionService.setApiKey(cleaned);
+    aiVisionService.setHfToken(hfTokenInput.trim());
+    aiVisionService.setPollinationsKey(pollinationsKeyInput.trim());
     aiVisionService.setPreferredModel(selectedModel);
     setTestingConnection(true);
     setTestResult(null);
@@ -59,6 +67,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setApiKeyInput('');
     setSavedSuccess(false);
     setTestResult(null);
+  };
+
+  const handleClearHfToken = () => {
+    aiVisionService.setHfToken('');
+    setHfTokenInput('');
   };
 
   const handlePasteFromClipboard = async () => {
@@ -239,7 +252,130 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
-          {/* 2. Camera Resolution Settings */}
+          {/* 2. Pose Reference Photo Generator (Quality & Quota) */}
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-purple-400" />
+                <span className="text-sm font-semibold text-white">Pose Photo Quality</span>
+              </div>
+              <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
+                hfTokenInput.trim()
+                  ? 'bg-purple-500/20 text-purple-300 border-purple-400/40'
+                  : pollinationsKeyInput.trim()
+                  ? 'bg-blue-500/20 text-blue-300 border-blue-400/40'
+                  : 'bg-white/10 text-gray-400 border-white/10'
+              }`}>
+                {hfTokenInput.trim() ? 'FLUX.1 [12B Studio]' : pollinationsKeyInput.trim() ? 'Pollinations FLUX' : 'Free AI (Distilled)'}
+              </span>
+            </div>
+
+            <p className="text-xs text-gray-300 leading-relaxed">
+              For crisp, human-realistic reference photos with accurate hands, real skin, and studio lighting, connect a 100% free Hugging Face token.
+            </p>
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-semibold text-gray-300">
+                  Hugging Face Token <span className="text-emerald-400 font-normal">(Free, No Credit Card)</span>
+                </label>
+                <a
+                  href="https://huggingface.co/settings/tokens"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[10px] text-purple-400 hover:text-purple-300 flex items-center gap-1 transition-colors"
+                >
+                  <span>Get Free Token</span>
+                  <ExternalLink className="w-2.5 h-2.5" />
+                </a>
+              </div>
+
+              <div className="relative flex items-center">
+                <input
+                  type={showHfKey ? 'text' : 'password'}
+                  placeholder="Paste hf_... token"
+                  value={hfTokenInput}
+                  onChange={(e) => setHfTokenInput(e.target.value)}
+                  className={`w-full bg-black/60 border rounded-xl py-2 pl-3 pr-16 text-xs text-white placeholder-gray-500 font-mono focus:outline-none transition-colors ${
+                    hfTokenInput.trim() ? 'border-purple-500/80 focus:border-purple-400' : 'border-white/10 focus:border-purple-500'
+                  }`}
+                />
+                <div className="absolute right-2 flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const txt = await navigator.clipboard.readText();
+                        if (txt) setHfTokenInput(txt.trim());
+                      } catch {}
+                    }}
+                    className="p-1 text-gray-400 hover:text-purple-400 transition-colors"
+                    title="Paste from clipboard"
+                  >
+                    <Clipboard className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowHfKey(!showHfKey)}
+                    className="p-1 text-gray-400 hover:text-white transition-colors"
+                  >
+                    {showHfKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-white/5 space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-semibold text-gray-400">
+                    Pollinations API Key <span className="text-gray-500 font-normal">(Optional)</span>
+                  </label>
+                  <a
+                    href="https://enter.pollinations.ai"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors"
+                  >
+                    <span>enter.pollinations.ai</span>
+                    <ExternalLink className="w-2.5 h-2.5" />
+                  </a>
+                </div>
+                <input
+                  type="password"
+                  placeholder="Paste Pollinations key (optional)..."
+                  value={pollinationsKeyInput}
+                  onChange={(e) => setPollinationsKeyInput(e.target.value)}
+                  className="w-full bg-black/60 border border-white/10 rounded-xl py-1.5 px-3 text-xs text-white placeholder-gray-500 font-mono focus:border-blue-500 focus:outline-none transition-colors"
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                {hfTokenInput || pollinationsKeyInput ? (
+                  <button
+                    onClick={() => {
+                      handleClearHfToken();
+                      aiVisionService.setPollinationsKey('');
+                      setPollinationsKeyInput('');
+                    }}
+                    className="text-[10px] text-red-400 hover:text-red-300 transition-colors"
+                  >
+                    Clear Tokens
+                  </button>
+                ) : (
+                  <span className="text-[10px] text-gray-400">
+                    Without key: runs fast zero-key fallback
+                  </span>
+                )}
+                <button
+                  onClick={handleSaveApiKey}
+                  className="px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs transition-colors shadow-sm active:scale-95"
+                >
+                  Save Quality Settings
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* 3. Camera Resolution Settings */}
           <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-sm font-semibold text-white">Full-Sensor Camera Mode</span>

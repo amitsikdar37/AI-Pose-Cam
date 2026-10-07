@@ -2,9 +2,13 @@ import type { AIPoseSuggestion } from '../types/camera';
 
 const API_KEY_STORAGE = 'gemini_api_key';
 const MODEL_PREF_STORAGE = 'gemini_model_preference';
+const HF_TOKEN_STORAGE = 'hf_api_token';
+const POLLINATIONS_KEY_STORAGE = 'pollinations_api_key';
 
 export class AIVisionService {
   private apiKey: string = '';
+  private hfToken: string = '';
+  private pollinationsKey: string = '';
   private preferredModel: string = 'auto';
   private cachedModels: string[] = [];
 
@@ -15,6 +19,8 @@ export class AIVisionService {
     this.apiKey = this.sanitizeApiKey(
       localStorage.getItem(API_KEY_STORAGE) || envKey
     );
+    this.hfToken = (localStorage.getItem(HF_TOKEN_STORAGE) || '').trim();
+    this.pollinationsKey = (localStorage.getItem(POLLINATIONS_KEY_STORAGE) || '').trim();
     const storedModel = localStorage.getItem(MODEL_PREF_STORAGE) || 'gemini-3.5-flash';
     const legacyDiscontinued = [
       'gemini-1.5-flash',
@@ -30,6 +36,32 @@ export class AIVisionService {
       localStorage.setItem(MODEL_PREF_STORAGE, 'gemini-3.5-flash');
     } else {
       this.preferredModel = storedModel;
+    }
+  }
+
+  public getHfToken(): string {
+    return this.hfToken;
+  }
+
+  public setHfToken(token: string): void {
+    this.hfToken = (token || '').replace(/["';\s\\]/g, '').trim();
+    if (this.hfToken) {
+      localStorage.setItem(HF_TOKEN_STORAGE, this.hfToken);
+    } else {
+      localStorage.removeItem(HF_TOKEN_STORAGE);
+    }
+  }
+
+  public getPollinationsKey(): string {
+    return this.pollinationsKey;
+  }
+
+  public setPollinationsKey(key: string): void {
+    this.pollinationsKey = (key || '').replace(/["';\s\\]/g, '').trim();
+    if (this.pollinationsKey) {
+      localStorage.setItem(POLLINATIONS_KEY_STORAGE, this.pollinationsKey);
+    } else {
+      localStorage.removeItem(POLLINATIONS_KEY_STORAGE);
     }
   }
 
@@ -153,14 +185,73 @@ export class AIVisionService {
 
   /**
    * Generates a photorealistic reference image from an image generation prompt.
-   * 1. Attempts Google Imagen 3 if API key is available.
-   * 2. Seamlessly falls back to fast, high-quality FLUX.1 generation via Pollinations with randomized seeds.
+   * Priority:
+   * 1. Hugging Face Serverless FLUX.1 [schnell] / SDXL (if HF Token is provided) -> 12B parameter studio quality!
+   * 2. Pollinations FLUX.1 (if Pollinations Key is provided)
+   * 3. Google Imagen 3 (if available on Gemini key)
+   * 4. Zero-Key Fallback with enhanced photographic realism conditioning
    */
   public async generateImageFromPrompt(
     prompt: string,
     aspectRatio: '3:4' | '1:1' = '1:1'
-  ): Promise<string> {
-    // 1. Try Google Imagen 3 API if key is set
+  ): Promise<{ imageUrl: string; engine: string }> {
+    const clean = prompt
+      .replace(/[\n\r]+/g, ' ')
+      .replace(/["']/g, '')
+      .trim();
+
+    // 1. Hugging Face Serverless Inference: FLUX.1 [schnell] / SDXL
+    if (this.hfToken) {
+      const hfModels = [
+        { id: 'black-forest-labs/FLUX.1-schnell', label: 'FLUX.1 [schnell]' },
+        { id: 'stabilityai/stable-diffusion-xl-base-1.0', label: 'SDXL 1.0' },
+      ];
+
+      for (const m of hfModels) {
+        try {
+          const endpoint = `https://router.huggingface.co/hf-inference/models/${m.id}`;
+          const resp = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${this.hfToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              inputs: `RAW candid color photograph of a stylish fully clothed person, ${clean}, 35mm lens, sharp focus, natural skin texture`,
+            }),
+          });
+
+          if (resp.ok) {
+            const blob = await resp.blob();
+            if (blob && blob.size > 1000) {
+              const dataUrl = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+              });
+              return { imageUrl: dataUrl, engine: m.label };
+            }
+          }
+        } catch (hfErr) {
+          console.warn(`Hugging Face inference error (${m.id}):`, hfErr);
+        }
+      }
+    }
+
+    // 2. Pollinations Authenticated (Unlocks genuine FLUX & Turbo with Pollen)
+    if (this.pollinationsKey) {
+      try {
+        const seed = Math.floor(Math.random() * 9999999) + 1;
+        const encoded = encodeURIComponent(`RAW 35mm photograph, fully clothed person, ${clean}, natural lighting`);
+        const url = `https://image.pollinations.ai/prompt/${encoded}?model=flux&key=${this.pollinationsKey}&nologo=true&seed=${seed}`;
+        return { imageUrl: url, engine: 'FLUX.1 (Pollinations)' };
+      } catch (pollErr) {
+        console.warn('Pollinations key error:', pollErr);
+      }
+    }
+
+    // 3. Google Imagen 3 API if key is set
     if (this.apiKey) {
       try {
         const imagenEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${this.apiKey}`;
@@ -168,7 +259,7 @@ export class AIVisionService {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            instances: [{ prompt }],
+            instances: [{ prompt: clean }],
             parameters: {
               sampleCount: 1,
               aspectRatio: aspectRatio === '3:4' ? '3:4' : '1:1',
@@ -181,7 +272,7 @@ export class AIVisionService {
           const data = await resp.json();
           const base64Data = data.predictions?.[0]?.bytesBase64Encoded;
           if (base64Data) {
-            return `data:image/jpeg;base64,${base64Data}`;
+            return { imageUrl: `data:image/jpeg;base64,${base64Data}`, engine: 'Google Imagen 3' };
           }
         }
       } catch (err) {
@@ -189,21 +280,16 @@ export class AIVisionService {
       }
     }
 
-    // 2. Professional Photographic Reference Synthesis
-    const clean = prompt
-      .replace(/[\n\r]+/g, ' ')
-      .replace(/["']/g, '')
-      .trim();
-
-    // Ensure complete modern clothing and crisp anatomical clarity to prevent distorted limbs
-    const qualityPrefix = 'Professional editorial photography of a fully clothed stylish person wearing modern casual apparel,';
-    const qualitySuffix = 'clear posture, sharp focus on facial features and hands, natural ambient lighting, 50mm portrait photography, realistic anatomy';
-
+    // 4. Zero-Key Fast Fallback with anti-doll / realistic clothing conditioning
+    const qualityPrefix = 'RAW color photograph, candid 35mm photo of stylish fully clothed person,';
+    const qualitySuffix = 'real human skin texture, natural pose, sharp focus, ambient lighting';
     const finalPrompt = `${qualityPrefix} ${clean}, ${qualitySuffix}`.slice(0, 360);
 
     const seed = Math.floor(Math.random() * 9999999) + 1;
     const encoded = encodeURIComponent(finalPrompt);
-    return `https://image.pollinations.ai/prompt/${encoded}?nologo=true&seed=${seed}`;
+    const fallbackUrl = `https://image.pollinations.ai/prompt/${encoded}?enhance=false&nologo=true&seed=${seed}`;
+
+    return { imageUrl: fallbackUrl, engine: 'Free AI (Fast)' };
   }
 
   /**
@@ -355,7 +441,7 @@ Return ONLY valid JSON matching this exact structure:
     }
 
     // Step 2: Generate the Reference Photo from the Vision Model's Prompt!
-    const imageUrl = await this.generateImageFromPrompt(
+    const { imageUrl, engine } = await this.generateImageFromPrompt(
       parsedResult.imagePrompt,
       '1:1'
     );
@@ -368,6 +454,7 @@ Return ONLY valid JSON matching this exact structure:
       sceneObjects: parsedResult.sceneObjects || [],
       imagePrompt: parsedResult.imagePrompt,
       referenceImageUrl: imageUrl,
+      imageEngine: engine,
       createdAt: Date.now(),
       cameraFacing: options?.facingMode || 'environment',
       generationEngine: 'gemini_vision',

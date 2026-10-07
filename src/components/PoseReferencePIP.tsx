@@ -266,6 +266,13 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-400/30">
                   Gemini Vision
                 </span>
+                <span className={`text-[9px] px-1.5 py-0.5 rounded border ${
+                  currentPose.imageEngine?.includes('FLUX')
+                    ? 'bg-purple-500/20 text-purple-300 border-purple-400/40 font-bold'
+                    : 'bg-white/10 text-gray-300 border-white/10'
+                }`}>
+                  {currentPose.imageEngine || 'AI Photo'}
+                </span>
               </div>
               <button
                 onClick={() => setIsExpanded(false)}
@@ -315,6 +322,14 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({
               </div>
               <p className="text-xs text-gray-200 leading-relaxed">{currentPose.directionTip}</p>
             </div>
+
+            {/* Free Mode Quality Notice */}
+            {currentPose.imageEngine?.includes('Free AI') && (
+              <div className="px-4 py-2 bg-purple-950/30 border-t border-purple-500/20 flex items-center justify-between text-[10px]">
+                <span className="text-purple-300 font-medium">Want 1024px studio photorealism?</span>
+                <span className="text-emerald-400 font-semibold">Settings ⚙️ → Free HF Token</span>
+              </div>
+            )}
 
             {/* Action Bar */}
             {onRegeneratePose && (

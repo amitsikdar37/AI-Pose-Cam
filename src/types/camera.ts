@@ -8,7 +8,8 @@ export interface AIPoseSuggestion {
   referenceImageUrl: string;
   createdAt: number;
   cameraFacing?: 'user' | 'environment';
-  generationEngine?: 'gemini_vision' | 'free_ai' | 'smart_rotation';
+  generationEngine?: string;
+  imageEngine?: string;
 }
 
 // PosePreset alias for compatibility
