@@ -3,157 +3,19 @@ import type { AIPoseSuggestion } from '../types/camera';
 const API_KEY_STORAGE = 'gemini_api_key';
 const MODEL_PREF_STORAGE = 'gemini_model_preference';
 
-interface DiversePoseArchetype {
-  name: string;
-  focus: string;
-  title: string;
-  vibe: string;
-  directionTip: string;
-  sceneObjects: string[];
-  imagePrompt: string;
-}
-
-const ENVIRONMENT_ARCHETYPES: DiversePoseArchetype[] = [
-  {
-    name: 'Sculptural Chair Recline',
-    focus: 'Seated posture with crossed leg and asymmetric armrest',
-    title: 'The Modern Chair Recline',
-    vibe: 'Editorial & Effortless Chic',
-    directionTip: 'Sit back into the chair or sofa, cross one leg casually over the knee, rest your elbow on the armrest, and look just off-camera with a relaxed expression.',
-    sceneObjects: ['Armchair / Sofa', 'Natural Room Light'],
-    imagePrompt: 'A photorealistic photograph of a stylish person sitting casually in an armchair, one leg crossed over the knee, relaxed posture, soft ambient interior lighting, 50mm portrait lens, 8k',
-  },
-  {
-    name: 'Casual Wall Slant',
-    focus: 'Vertical surface lean with relaxed legs',
-    title: 'The Casual Wall Slant',
-    vibe: 'Urban & Confident',
-    directionTip: 'Lean your back or shoulder gently against the nearest wall or doorway. Cross your front ankle over your back ankle, rest hands loosely in pockets, and look toward the camera.',
-    sceneObjects: ['Wall / Doorframe', 'Architectural Lines'],
-    imagePrompt: 'A photorealistic photograph of a stylish person leaning casually with shoulder against a modern architectural wall, crossed ankles, confident posture, soft cinematic lighting, 50mm portrait',
-  },
-  {
-    name: 'Mid-Turn Candid',
-    focus: 'Dynamic movement with over-shoulder glance',
-    title: 'The Mid-Stride Glance',
-    vibe: 'Candid Motion & Spontaneity',
-    directionTip: 'Take a slow step forward as if walking past the camera, then turn your head back over your shoulder with an easy, natural smile.',
-    sceneObjects: ['Open Floor / Pathway', 'Dynamic Light'],
-    imagePrompt: 'A photorealistic candid photograph of a stylish person caught mid-stride, turning head back over shoulder with a spontaneous smile, natural movement, warm sunlight, 50mm lens',
-  },
-  {
-    name: 'Coffee Table Lean',
-    focus: 'Seated forward lean with chin or elbows on table',
-    title: 'The Cafe Table Lean',
-    vibe: 'Intimate & Conversational',
-    directionTip: 'Sit forward toward the table, place your forearms or elbows comfortably on the surface, and lean slightly forward toward the lens with a warm, engaging gaze.',
-    sceneObjects: ['Table / Desk', 'Coffee Cup / Prop'],
-    imagePrompt: 'A photorealistic portrait photograph of a person seated at a wooden table, leaning forward on elbows with a warm engaging expression, soft window light, cozy cafe atmosphere, 50mm lens',
-  },
-  {
-    name: 'Floor Lounge Cross',
-    focus: 'Low ground sitting with bent knees',
-    title: 'The Floor Lounge',
-    vibe: 'Boho & Relaxed Lifestyle',
-    directionTip: 'Sit casually on the rug or floor with knees bent sideways, lean one hand back on the floor for support, and tilt your head with a thoughtful smile.',
-    sceneObjects: ['Floor / Area Rug', 'Ambient Room Decor'],
-    imagePrompt: 'A photorealistic photograph of a stylish person sitting cross-legged on a modern wooden floor with rug, casual relaxed posture, leaning back on one palm, warm interior lighting, 50mm',
-  },
-  {
-    name: 'Balcony / Ledge Rest',
-    focus: 'Elevated leaning pose with distant gaze',
-    title: 'The Balcony Horizon Gaze',
-    vibe: 'Dreamy & Contemplative',
-    directionTip: 'Lean your forearms on the balcony railing, counter, or window sill. Gaze out toward the horizon or light source, letting the natural daylight illuminate your profile.',
-    sceneObjects: ['Balcony Railing / Window Sill', 'Daylight Sky'],
-    imagePrompt: 'A photorealistic photograph of a person leaning forearms casually on a balcony railing, looking thoughtfully into the distance, beautiful golden hour sky in background, 50mm lens',
-  },
-  {
-    name: 'Architectural Doorway Frame',
-    focus: 'Using surroundings as a natural geometric frame',
-    title: 'The Doorway Silhouette Frame',
-    vibe: 'Clean Geometry & Modernism',
-    directionTip: 'Position yourself standing right inside a doorway or archway. Rest one hand against the doorframe at chest height, shifting your weight onto your back leg.',
-    sceneObjects: ['Doorframe / Archway', 'Geometric Backdrop'],
-    imagePrompt: 'A photorealistic portrait photograph of a person framed naturally inside a modern minimalist doorway, one hand resting on the jamb, clean geometric lines, soft rim lighting, 50mm',
-  },
-  {
-    name: 'Power Stance Hip Shift',
-    focus: 'Full standing posture with asymmetrical weight shift',
-    title: 'The Confident Stride & Shift',
-    vibe: 'Bold & High Fashion',
-    directionTip: 'Stand with feet shoulder-width apart, shift your weight onto one hip, hook one thumb into your waistband or pocket, and gaze directly down the camera lens.',
-    sceneObjects: ['Open Space / Clean Backdrop', 'Studio Ambient Light'],
-    imagePrompt: 'A photorealistic full-body portrait photograph of a stylish person in a confident standing pose, weight shifted onto one hip, one hand in pocket, modern minimal background, 50mm lens',
-  },
-];
-
-const SELFIE_ARCHETYPES: DiversePoseArchetype[] = [
-  {
-    name: 'Soft Jawline Rest',
-    focus: 'Hand-to-jaw gentle framing with soft smile',
-    title: 'The Soft Jawline Rest',
-    vibe: 'Warm Glow & Gentle Smile',
-    directionTip: 'Hold your phone slightly above eye level. Rest your fingertips softly along your jawline or cheek, tilt your head slightly, and smile warmly into the camera.',
-    sceneObjects: ['Soft Ambient Lighting', 'Phone Camera'],
-    imagePrompt: 'A photorealistic close-up selfie portrait photograph of a stylish smiling person, gently resting fingertips along jawline, warm golden light, gentle head tilt, 35mm lens, high resolution',
-  },
-  {
-    name: 'Hair Touch Candid',
-    focus: 'Spontaneous hand-in-hair gesture',
-    title: 'The Hair-Touch Candid',
-    vibe: 'Playful & Spontaneous',
-    directionTip: 'Run one hand casually through your hair as if caught in a spontaneous moment. Angle your phone at 45 degrees and glance slightly off-center with a relaxed smirk.',
-    sceneObjects: ['Natural Daylight', 'Casual Backdrop'],
-    imagePrompt: 'A photorealistic close-up selfie photograph of a stylish person with hand running through hair in a spontaneous candid gesture, playful relaxed smirk, bright natural daylight, 35mm',
-  },
-  {
-    name: 'Over-the-Shoulder Selfie',
-    focus: 'Angled torso with back glance',
-    title: 'The Over-Shoulder Glance',
-    vibe: 'Cinematic & Flattering Depth',
-    directionTip: 'Turn your shoulders slightly away from the camera, then turn your neck back to look over your shoulder directly into the lens. This creates flattering jawline definition.',
-    sceneObjects: ['Soft Rim Lighting', 'Blurred Background'],
-    imagePrompt: 'A photorealistic selfie portrait photograph of a person looking back over their shoulder into the lens, sharp jawline definition, soft bokeh background, flattering cinematic light, 35mm',
-  },
-  {
-    name: 'Sunlit Shadow Play',
-    focus: 'Chiaroscuro lighting across face',
-    title: 'The Golden Sunlit Edge',
-    vibe: 'Moody Art & Warm Shadows',
-    directionTip: 'Position yourself so sunlight strikes one side of your face, creating soft dimensional shadows. Hold phone at eye level and look intently into the lens.',
-    sceneObjects: ['Golden Hour Sunbeams', 'Window Blind Shadow'],
-    imagePrompt: 'A photorealistic close-up selfie portrait of a person with golden hour sunlight casting artistic soft shadows across half of the face, striking eyes, cinematic lighting, 35mm',
-  },
-  {
-    name: 'Cozy Collar Frame',
-    focus: 'Two hands framing jacket collar',
-    title: 'The Cozy Collar Frame',
-    vibe: 'Cozy & Approachable',
-    directionTip: 'Use both hands to gently hold the collar or lapel of your shirt or jacket. Look directly at the camera with big, approachable eyes and a soft genuine smile.',
-    sceneObjects: ['Cozy Apparel / Texture', 'Diffused Soft Light'],
-    imagePrompt: 'A photorealistic selfie photograph of a stylish smiling person lightly holding jacket collar, warm approachable gaze, soft diffused indoor lighting, high detail portrait photography, 35mm',
-  },
-  {
-    name: 'High Angle Doll Glance',
-    focus: 'Elevated camera angle looking up',
-    title: 'The Elevated High-Angle Glance',
-    vibe: 'Sweet & Dramatic Perspective',
-    directionTip: 'Raise your phone 30-40 degrees higher than eye level, tuck your chin slightly, and look up toward the camera with open eyes and a sweet expression.',
-    sceneObjects: ['Top-down Ambient Glow', 'Minimal Background'],
-    imagePrompt: 'A photorealistic high-angle selfie portrait of a person looking up toward camera, expressive eyes, flattering chin angle, soft ring light glow, clean minimalist aesthetic, 35mm',
-  },
-];
-
 export class AIVisionService {
   private apiKey: string = '';
-  private preferredModel: string = 'gemini-1.5-pro';
+  private preferredModel: string = 'auto';
+  private cachedModels: string[] = [];
 
   constructor() {
+    const envKey = typeof import.meta !== 'undefined' && import.meta.env
+      ? import.meta.env.VITE_GEMINI_API_KEY || ''
+      : '';
     this.apiKey = this.sanitizeApiKey(
-      localStorage.getItem(API_KEY_STORAGE) || (import.meta as any).env?.VITE_GEMINI_API_KEY || ''
+      localStorage.getItem(API_KEY_STORAGE) || envKey
     );
-    this.preferredModel = localStorage.getItem(MODEL_PREF_STORAGE) || 'gemini-1.5-pro';
+    this.preferredModel = localStorage.getItem(MODEL_PREF_STORAGE) || 'auto';
   }
 
   public sanitizeApiKey(key: string): string {
@@ -163,6 +25,7 @@ export class AIVisionService {
 
   public setApiKey(key: string): void {
     this.apiKey = this.sanitizeApiKey(key);
+    this.cachedModels = [];
     if (this.apiKey) {
       localStorage.setItem(API_KEY_STORAGE, this.apiKey);
     } else {
@@ -184,18 +47,76 @@ export class AIVisionService {
   }
 
   public hasApiKey(): boolean {
-    return Boolean(this.apiKey && this.apiKey.trim().length > 0);
+    return Boolean(this.apiKey && this.apiKey.trim().length > 10);
+  }
+
+  /**
+   * Queries Google Gemini API to discover supported models for this API key,
+   * prioritizing Gemini 1.5 Pro (deep vision) and 2.0 Flash.
+   */
+  public async discoverAvailableModels(): Promise<string[]> {
+    if (this.cachedModels.length > 0) return this.cachedModels;
+
+    if (!this.hasApiKey()) {
+      return ['gemini-1.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    }
+
+    try {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models?key=${this.apiKey}`;
+      const response = await fetch(endpoint);
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data.models)) {
+          const supported = data.models
+            .filter((m: any) =>
+              Array.isArray(m.supportedGenerationMethods) &&
+              m.supportedGenerationMethods.includes('generateContent')
+            )
+            .map((m: any) => m.name.replace(/^models\//, ''))
+            .filter((name: string) => name.startsWith('gemini'));
+
+          // Priority: 1.5-pro > 2.0-flash > 1.5-flash
+          const prioritized = supported.sort((a: string, b: string) => {
+            const score = (name: string) => {
+              if (name === 'gemini-1.5-pro' || name.includes('1.5-pro')) return 100;
+              if (name === 'gemini-2.0-flash' || name.includes('2.0-flash')) return 90;
+              if (name === 'gemini-1.5-flash' || name.includes('1.5-flash')) return 80;
+              if (name.includes('pro')) return 70;
+              if (name.includes('flash')) return 60;
+              return 10;
+            };
+            return score(b) - score(a);
+          });
+
+          if (prioritized.length > 0) {
+            this.cachedModels = prioritized;
+            return prioritized;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Could not auto-discover models:', e);
+    }
+
+    return ['gemini-1.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash'];
   }
 
   public async testConnection(key?: string): Promise<{ success: boolean; message: string; models?: string[] }> {
     const cleanKey = this.sanitizeApiKey(key || this.apiKey);
     if (!cleanKey) {
-      return { success: false, message: 'API key is empty.' };
+      return { success: false, message: 'Please enter a Gemini API key first.' };
     }
 
     try {
       const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`);
       if (!resp.ok) {
+        const errText = await resp.text();
+        if (resp.status === 400 || errText.includes('API_KEY_INVALID')) {
+          return { success: false, message: 'Invalid API key. Google rejected this key (HTTP 400: API_KEY_INVALID).' };
+        }
+        if (resp.status === 403 || errText.includes('PERMISSION_DENIED')) {
+          return { success: false, message: 'Permission denied (HTTP 403). Make sure Generative Language API is enabled.' };
+        }
         return { success: false, message: `Google returned error status ${resp.status}. Please verify your key.` };
       }
       const data = await resp.json();
@@ -216,7 +137,7 @@ export class AIVisionService {
   /**
    * Generates a photorealistic reference image from an image generation prompt.
    * 1. Attempts Google Imagen 3 if API key is available.
-   * 2. Seamlessly falls back to fast, high-quality Pollinations Flux generation with unique randomized seeds.
+   * 2. Seamlessly falls back to fast, high-quality FLUX.1 generation via Pollinations with randomized seeds.
    */
   public async generateImageFromPrompt(
     prompt: string,
@@ -245,33 +166,31 @@ export class AIVisionService {
           if (base64Data) {
             return `data:image/jpeg;base64,${base64Data}`;
           }
-        } else {
-          console.warn('Google Imagen 3 returned non-OK, using high-speed Flux fallback:', resp.status);
         }
       } catch (err) {
-        console.warn('Imagen 3 fetch failed, switching to Flux fallback:', err);
+        console.warn('Imagen 3 skipped:', err);
       }
     }
 
-    // 2. High-speed Pollinations Flux fallback (100% free, reliable, instant, 0 key required)
+    // 2. High-speed FLUX.1 fallback (State-of-the-art open weights, photorealistic human anatomy)
     const cleanPrompt = prompt
       .replace(/[\n\r]+/g, ' ')
       .replace(/["']/g, '')
       .trim()
       .slice(0, 350);
 
-    // CRITICAL: Always generate a unique seed so Pollinations produces a fresh new image variation every time
     const seed = Math.floor(Math.random() * 9999999) + 1;
     const encoded = encodeURIComponent(cleanPrompt);
     return `https://image.pollinations.ai/prompt/${encoded}?nologo=true&seed=${seed}&model=flux`;
   }
 
   /**
-   * Full AI Director Pipeline:
-   * 1. Direct Multimodal Gemini Vision (if key available): Inspects real camera frame, strictly excluding past poses.
-   * 2. Free AI Engine (Pollinations Text LLM): Free fallback with custom creative prompt synthesis.
-   * 3. Multi-Archetype Rotation Engine: Guarantees 0-repeat pose variation even offline.
-   * 4. Text-to-Image AI Reference Synthesis.
+   * Core Vision Pipeline:
+   * 1. Sends the live camera frame to Google Gemini Multimodal Vision API.
+   * 2. Gemini inspects the actual image to identify real physical objects (chairs, tables, walls, props).
+   * 3. Based purely on the scene, Gemini devises the best pose interacting with the primary object.
+   * 4. Gemini crafts a tailored photorealistic text-to-image prompt.
+   * 5. The prompt is passed to the image generator to render the reference photo.
    */
   public async analyzeSceneAndGeneratePose(
     base64Image: string,
@@ -279,47 +198,65 @@ export class AIVisionService {
     options?: {
       facingMode?: 'user' | 'environment';
       previousTitles?: string[];
-      varietyIndex?: number;
     }
   ): Promise<AIPoseSuggestion> {
+    if (!this.hasApiKey()) {
+      throw new Error(
+        'Please enter a Google Gemini API Key in Settings to enable real-time camera scene analysis.'
+      );
+    }
+
     const isFront = options?.facingMode === 'user';
-    const previousTitles = options?.previousTitles || [];
-    const varietyIndex = options?.varietyIndex ?? Math.floor(Math.random() * 10);
-
-    const pool = isFront ? SELFIE_ARCHETYPES : ENVIRONMENT_ARCHETYPES;
-    const archetypeIndex = Math.abs(varietyIndex) % pool.length;
-    const targetArchetype = pool[archetypeIndex];
-
-    const cameraModeDesc = isFront
+    const cameraContext = isFront
       ? 'Front-facing selfie camera (close-up to upper-body portrait distance)'
-      : 'Rear main camera (subject in environment, portrait to full-body)';
+      : 'Rear main camera (subject in room / environment, portrait to full-body)';
 
-    const exclusionList = previousTitles.length > 0
-      ? `DO NOT REPEAT: The following poses were ALREADY suggested in this session:\n${previousTitles.map((t) => `- "${t}"`).join('\n')}\nYou MUST choose a completely DIFFERENT pose category and physical position.`
-      : '';
+    const exclusionNotice =
+      options?.previousTitles && options.previousTitles.length > 0
+        ? `PREVIOUS POSES ALREADY SUGGESTED: ${options.previousTitles.join(', ')}.\nCRITICAL: Do NOT repeat these exact poses. Devise a fresh creative variation or different posture angle for the scene.`
+        : '';
 
-    const geminiPrompt = `You are a world-class professional photographer and creative pose director.
-Analyze this live camera frame and craft a creative photography pose idea tailored specifically to this scene.
+    const prompt = `You are a world-class professional photographer and creative pose director.
+Inspect this live camera viewfinder snapshot very carefully.
+CAMERA CONTEXT: ${cameraContext}.
 
-CAMERA CONTEXT: ${cameraModeDesc}.
-${exclusionList}
-TARGET ARCHETYPE INSPIRATION: Focus on "${targetArchetype.name}" (${targetArchetype.focus}).
+1. SCENE OBJECT IDENTIFICATION:
+   - Identify setting, lighting, and specifically what physical objects, furniture, or architecture are visible in this frame (e.g. chair, armchair, folding chair, couch, table, desk, wall, door/doorway, steps/stairs, railing/balcony, window, bed, floor).
+   - Look closely at what the subject can physically interact with.
 
-CRITICAL REQUIREMENTS:
-1. SCENE OBJECT IDENTIFICATION: Detect specific physical objects, furniture, architecture, or elements in the frame (e.g. armchair, desk, cafe table, wall, staircase, doorway, railing, window, cup, plant).
-2. OBJECT UTILIZATION: The suggested pose MUST actively use or interact with one or more of these detected objects (e.g. sitting, leaning, propping an elbow/foot, or framing). If it's a selfie, utilize flattering facial angles, natural hand gestures, and background elements.
-3. POSE INSTRUCTION: Write 2-3 clear, friendly, actionable sentences on how to position body, limbs, and head.
-4. IMAGE GENERATION PROMPT: Write a photorealistic text-to-image prompt showing a stylish person striking this exact pose with the detected scene objects.
-   - Format: "A photorealistic photograph of a stylish person [exact pose], interacting with [detected objects], flattering lighting, 50mm portrait photography, 8k".
+2. DYNAMIC POSE RECOMMENDATION:
+   - Based PURELY on the real objects visible in this snapshot, recommend the most natural, stylish, and flattering photography pose that directly uses or interacts with the primary object.
+   - For example:
+     * If a chair, couch, bench, or seat is visible in the frame: Recommend a pose seated on or casually leaning against that chair (e.g. sitting comfortably, legs crossed or relaxed, forearms or elbows resting on knees/lap/armrest, relaxed torso angle).
+     * If a wall, pillar, or doorway is prominent: Recommend a relaxed wall-leaning pose.
+     * If a table or desk is prominent: Recommend sitting or leaning forward over the table.
+     * If steps or stairs are visible: Recommend a seated step pose.
+     * If open space: Recommend a relaxed standing or walking candid pose.
+     * If front selfie camera: Recommend a close-up portrait with flattering head tilt and natural hand gestures.
 
-Output ONLY valid JSON matching this schema:
+${exclusionNotice}
+
+3. OUTPUT REQUIREMENTS:
+   - "sceneObjects": Array of 1 to 4 dominant physical objects detected in the snapshot.
+   - "title": Short catchy title for the pose (e.g. "The Relaxed Chair Sit", "The Casual Desk Lean", "The Architectural Wall Slant").
+   - "vibe": Aesthetic mood (e.g. "Casual Editorial", "Warm Living Room", "Effortless Candid").
+   - "directionTip": 2-3 clear, friendly, actionable sentences instructing the person exactly how to position their body, limbs, and face with the detected object.
+   - "imagePrompt": A vivid, photorealistic prompt for a text-to-image AI depicting a stylish person striking this exact pose with the detected scene objects.
+     Must be formatted as: "A photorealistic photograph of a stylish person [exact pose], interacting with [detected objects], natural flattering lighting, 50mm portrait lens, 8k, cinematic, realistic human anatomy".
+
+Return ONLY valid JSON matching this exact structure:
 {
-  "title": "Short catchy pose title",
-  "vibe": "Short aesthetic vibe",
-  "directionTip": "2-3 clear actionable sentences",
   "sceneObjects": ["Object 1", "Object 2"],
-  "imagePrompt": "Detailed photorealistic text-to-image prompt"
+  "title": "Catchy Pose Title",
+  "vibe": "Aesthetic Vibe",
+  "directionTip": "Step-by-step instructions...",
+  "imagePrompt": "Photorealistic prompt..."
 }`;
+
+    const discovered = await this.discoverAvailableModels();
+    const modelsToTry = this.preferredModel !== 'auto'
+      ? [this.preferredModel, ...discovered.filter((m) => m !== this.preferredModel)]
+      : discovered;
 
     let parsedResult: {
       title: string;
@@ -329,121 +266,70 @@ Output ONLY valid JSON matching this schema:
       imagePrompt: string;
     } | null = null;
 
-    let engineUsed: 'gemini_vision' | 'free_ai' | 'smart_rotation' = 'smart_rotation';
+    let lastError: string = '';
 
-    // Layer 1: Google Gemini Multimodal Vision API (if user has key)
-    if (this.apiKey) {
-      const modelsToTry = [
-        this.preferredModel,
-        'gemini-1.5-pro',
-        'gemini-2.0-flash',
-        'gemini-1.5-flash',
-      ].filter((m, i, arr) => m && arr.indexOf(m) === i);
-
-      for (const model of modelsToTry) {
-        try {
-          const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
-          const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [
-                {
-                  parts: [
-                    { text: geminiPrompt },
-                    { inlineData: { mimeType, data: base64Image } },
-                  ],
-                },
-              ],
-              generationConfig: {
-                responseMimeType: 'application/json',
-                temperature: 0.9,
-              },
-            }),
-          });
-
-          if (!response.ok) continue;
-
-          const data = await response.json();
-          const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (!rawText) continue;
-
-          const match = rawText.match(/\{[\s\S]*\}/);
-          const jsonStr = match ? match[0] : rawText;
-          const candidate = JSON.parse(jsonStr);
-          if (candidate?.title && candidate?.imagePrompt) {
-            // Check that it didn't duplicate a previous title
-            if (!previousTitles.includes(candidate.title)) {
-              parsedResult = candidate;
-              engineUsed = 'gemini_vision';
-              break;
-            }
-          }
-        } catch (e) {
-          console.warn(`Model ${model} analysis failed:`, e);
-        }
-      }
-    }
-
-    // Layer 2: Free AI Engine (Pollinations Text LLM - Fast, free, 0 key required)
-    if (!parsedResult) {
+    for (const model of modelsToTry.slice(0, 4)) {
       try {
-        const textPrompt = `You are a creative photography pose director.
-Generate a fresh, creative pose idea tailored for a ${isFront ? 'front camera selfie' : 'rear camera room/environment photo'}.
-${exclusionList}
-TARGET ARCHETYPE INSPIRATION: Focus on "${targetArchetype.name}" (${targetArchetype.focus}).
-
-Output ONLY JSON matching:
-{
-  "title": "Short catchy pose title",
-  "vibe": "Short aesthetic vibe",
-  "directionTip": "2-3 clear actionable sentences instructing the person's body posture and facial expression",
-  "sceneObjects": ["Object 1", "Object 2"],
-  "imagePrompt": "A photorealistic portrait photograph of a stylish person in this exact pose, interacting with objects, 50mm portrait lens, 8k"
-}`;
-
-        const pollinationsResp = await fetch('https://text.pollinations.ai/', {
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+        const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            messages: [{ role: 'user', content: textPrompt }],
-            jsonMode: true,
+            contents: [
+              {
+                parts: [
+                  { text: prompt },
+                  { inlineData: { mimeType, data: base64Image } },
+                ],
+              },
+            ],
+            generationConfig: {
+              responseMimeType: 'application/json',
+              temperature: 0.7,
+            },
           }),
         });
 
-        if (pollinationsResp.ok) {
-          const rawText = await pollinationsResp.text();
-          const match = rawText.match(/\{[\s\S]*\}/);
-          if (match) {
-            const candidate = JSON.parse(match[0]);
-            if (candidate?.title && candidate?.directionTip && candidate?.imagePrompt) {
-              if (!previousTitles.includes(candidate.title)) {
-                parsedResult = candidate;
-                engineUsed = 'free_ai';
-              }
-            }
+        if (!response.ok) {
+          const errText = await response.text();
+          if (response.status === 400 && errText.includes('API_KEY_INVALID')) {
+            throw new Error('Invalid Gemini API Key. Please verify your key in Settings.');
           }
+          if (response.status === 429) {
+            lastError = 'Gemini quota exceeded (HTTP 429). Please wait a moment.';
+            continue;
+          }
+          lastError = `Google Gemini (${model}) error HTTP ${response.status}: ${errText.slice(0, 100)}`;
+          continue;
         }
-      } catch (err) {
-        console.warn('Free text AI generation failed, using rotation archetype:', err);
+
+        const data = await response.json();
+        const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!rawText) continue;
+
+        const match = rawText.match(/\{[\s\S]*\}/);
+        const jsonStr = match ? match[0] : rawText;
+        const candidate = JSON.parse(jsonStr);
+
+        if (candidate?.title && candidate?.imagePrompt && candidate?.directionTip) {
+          parsedResult = candidate;
+          break;
+        }
+      } catch (err: any) {
+        lastError = err?.message || 'Vision request failed';
+        if (err?.message?.includes('Invalid Gemini API Key')) {
+          throw err;
+        }
       }
     }
 
-    // Layer 3: Dynamic Multi-Archetype Rotation Engine (Local instant fallback)
     if (!parsedResult) {
-      // Find the first archetype from the pool that has not been used in previousTitles
-      const unused = pool.find((a) => !previousTitles.includes(a.title)) || targetArchetype;
-      parsedResult = {
-        title: unused.title,
-        vibe: unused.vibe,
-        directionTip: unused.directionTip,
-        sceneObjects: unused.sceneObjects,
-        imagePrompt: unused.imagePrompt,
-      };
-      engineUsed = 'smart_rotation';
+      throw new Error(
+        lastError || 'Could not analyze scene with Gemini Vision. Please check your API key in Settings.'
+      );
     }
 
-    // Step 2: Generate the Reference Photo from the Prompt!
+    // Step 2: Generate the Reference Photo from the Vision Model's Prompt!
     const imageUrl = await this.generateImageFromPrompt(
       parsedResult.imagePrompt,
       '1:1'
@@ -452,14 +338,14 @@ Output ONLY JSON matching:
     return {
       id: `ai_pose_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       title: parsedResult.title,
-      vibe: parsedResult.vibe,
+      vibe: parsedResult.vibe || 'AI Scene Director',
       directionTip: parsedResult.directionTip,
       sceneObjects: parsedResult.sceneObjects || [],
       imagePrompt: parsedResult.imagePrompt,
       referenceImageUrl: imageUrl,
       createdAt: Date.now(),
       cameraFacing: options?.facingMode || 'environment',
-      generationEngine: engineUsed,
+      generationEngine: 'gemini_vision',
     };
   }
 }

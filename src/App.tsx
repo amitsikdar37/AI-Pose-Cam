@@ -100,6 +100,17 @@ export const App: React.FC = () => {
   // 2. Perform Scene Analysis & Text-to-Image Pose Generation
   const handlePerformAnalysis = useCallback(async () => {
     if (!videoRef.current || isAnalyzing) return;
+
+    if (!aiVisionService.hasApiKey()) {
+      setShowSettings(true);
+      setAiNotice({
+        type: 'warn',
+        text: '🔑 Please enter your Google Gemini API key in Settings so the AI can inspect your camera view.',
+      });
+      setTimeout(() => setAiNotice(null), 6000);
+      return;
+    }
+
     setIsAnalyzing(true);
     setAiNotice(null);
     triggerHaptic('medium');
@@ -121,7 +132,6 @@ export const App: React.FC = () => {
         {
           facingMode: isFront ? 'user' : 'environment',
           previousTitles: history,
-          varietyIndex: varietyCounterRef.current,
         }
       );
 
@@ -131,19 +141,12 @@ export const App: React.FC = () => {
 
       const objectsMentioned =
         newPose.sceneObjects.length > 0
-          ? ` utilizing ${newPose.sceneObjects.slice(0, 2).join(' & ')}`
+          ? ` (found: ${newPose.sceneObjects.slice(0, 3).join(', ')})`
           : '';
-
-      const engineLabel =
-        newPose.generationEngine === 'gemini_vision'
-          ? ' (Gemini Vision AI)'
-          : newPose.generationEngine === 'free_ai'
-          ? ' (Free AI Engine)'
-          : ' (Creative Director)';
 
       setAiNotice({
         type: 'success',
-        text: `✨ Generated "${newPose.title}"${engineLabel}${objectsMentioned}! Check reference card.`,
+        text: `✨ Analyzed scene: "${newPose.title}"${objectsMentioned}!`,
       });
 
       // Confetti burst for creative inspiration
@@ -163,9 +166,9 @@ export const App: React.FC = () => {
       console.error('Scene analysis failed:', e);
       setAiNotice({
         type: 'warn',
-        text: `Notice: ${e?.message || 'Could not generate pose'}. Try again.`,
+        text: e?.message || 'Could not analyze scene with Gemini Vision. Please check Settings.',
       });
-      setTimeout(() => setAiNotice(null), 4500);
+      setTimeout(() => setAiNotice(null), 6000);
     } finally {
       setIsAnalyzing(false);
     }

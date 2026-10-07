@@ -263,16 +263,9 @@ export const PoseReferencePIP: React.FC<PoseReferencePIPProps> = ({
                 <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-emerald-400/20 text-emerald-300 border border-emerald-400/30">
                   {currentPose.vibe}
                 </span>
-                {currentPose.generationEngine === 'gemini_vision' && (
-                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-400/30">
-                    Gemini Vision
-                  </span>
-                )}
-                {currentPose.generationEngine === 'free_ai' && (
-                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-400/30">
-                    Free AI
-                  </span>
-                )}
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-400/30">
+                  Gemini Vision
+                </span>
               </div>
               <button
                 onClick={() => setIsExpanded(false)}
