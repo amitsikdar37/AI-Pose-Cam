@@ -193,6 +193,7 @@ export class AIVisionService {
       return { success: false, message: 'Please enter a Hugging Face token first.' };
     }
 
+    let username = 'user';
     try {
       // 1. Check user profile & authentication
       const whoamiResp = await fetch('https://huggingface.co/api/whoami-v2', {
@@ -203,7 +204,6 @@ export class AIVisionService {
         return { success: false, message: 'Invalid token (HTTP 401). Please check the token string on huggingface.co.' };
       }
 
-      let username = 'user';
       if (whoamiResp.ok) {
         const whoami = await whoamiResp.json().catch(() => ({}));
         username = whoami?.name || whoami?.fullname || 'user';
@@ -223,7 +223,14 @@ export class AIVisionService {
       };
     } catch (err: any) {
       const msg = err?.message || '';
-      if (msg.includes('403') || msg.includes('Inference Providers') || msg.includes('permissions')) {
+      const lower = msg.toLowerCase();
+      if (lower.includes('no remaining credits') || lower.includes('credits') || lower.includes('subscribe to pro')) {
+        return {
+          success: false,
+          message: `Credits Exhausted: Your Hugging Face account (@${username}) has used up its free serverless trial credits ($0.00 remaining). Hugging Face free credits are limited per account. You can create a token from a new free HF account, top up prepaid credits at huggingface.co/settings/billing, or use Pose Cam's built-in Free AI fallback.`,
+        };
+      }
+      if (lower.includes('permission') || lower.includes('unauthorized') || (msg.includes('403') && !lower.includes('credit'))) {
         return {
           success: false,
           message: 'Permission Issue (HTTP 403): Token is missing "Inference Providers" permission. When creating a token on huggingface.co/settings/tokens, select Token type "Write" (or check "Make calls to Inference Providers").',
@@ -231,7 +238,7 @@ export class AIVisionService {
       }
       return {
         success: false,
-        message: `Hugging Face test error: ${msg || 'Could not verify token'}`,
+        message: `Hugging Face test note: ${msg || 'Could not verify token'}`,
       };
     }
   }
@@ -290,7 +297,10 @@ export class AIVisionService {
           }
         } catch (hfErr: any) {
           const errText = hfErr?.message || '';
-          if (errText.includes('403') || errText.includes('Inference Providers')) {
+          const lower = errText.toLowerCase();
+          if (lower.includes('no remaining credits') || lower.includes('credits') || lower.includes('subscribe to pro')) {
+            fallbackReason = 'Hugging Face free trial credits exhausted. Automatically using Free AI engine.';
+          } else if (errText.includes('403') || errText.includes('permission')) {
             fallbackReason = 'HF Token missing "Inference Providers" permission (HTTP 403). Create a "Write" token on huggingface.co.';
           } else if (errText.includes('401')) {
             fallbackReason = 'HF Token is invalid (HTTP 401). Check token in Settings.';
