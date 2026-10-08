@@ -17,6 +17,7 @@ import { CameraHUD } from './components/CameraHUD';
 import { PhotoPreviewModal } from './components/PhotoPreviewModal';
 import { SettingsModal } from './components/SettingsModal';
 import { PoseReferencePIP } from './components/PoseReferencePIP';
+import { OnboardingModal } from './components/OnboardingModal';
 
 export const App: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -40,6 +41,7 @@ export const App: React.FC = () => {
 
   // Settings & Modals State
   const [showSettings, setShowSettings] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showGrid, setShowGrid] = useState(false);
   const [viewfinderMode, setViewfinderMode] = useState<'wide' | 'cover'>('wide');
@@ -54,6 +56,19 @@ export const App: React.FC = () => {
   // Captured Photos History
   const [capturedPhotos, setCapturedPhotos] = useState<CapturedPhoto[]>([]);
   const lastPhoto = capturedPhotos[0] || null;
+
+  // Check if first-time user needs guided setup
+  useEffect(() => {
+    try {
+      const hasSeen = localStorage.getItem('posecam_has_seen_onboarding');
+      if (!hasSeen && !aiVisionService.hasApiKey()) {
+        const timer = setTimeout(() => {
+          setShowOnboarding(true);
+        }, 900);
+        return () => clearTimeout(timer);
+      }
+    } catch {}
+  }, []);
 
   // 1. Initialize Camera
   const initApp = useCallback(async () => {
@@ -87,12 +102,7 @@ export const App: React.FC = () => {
     if (!videoRef.current || isAnalyzing) return;
 
     if (!aiVisionService.hasApiKey()) {
-      setShowSettings(true);
-      setAiNotice({
-        type: 'warn',
-        text: '🔑 Please enter your Google Gemini API key in Settings so the AI can inspect your camera view.',
-      });
-      setTimeout(() => setAiNotice(null), 6000);
+      setShowOnboarding(true);
       return;
     }
 
@@ -543,8 +553,22 @@ export const App: React.FC = () => {
           sensorInfo={sensorInfo}
           onClose={() => setShowSettings(false)}
           onSetResolutionMode={handleSetResolutionMode}
+          onOpenSetupGuide={() => setShowOnboarding(true)}
         />
       )}
+
+      {/* 11. Guided Non-Scary Onboarding Modal */}
+      <OnboardingModal
+        isOpen={showOnboarding}
+        onClose={() => setShowOnboarding(false)}
+        onKeySaved={() => {
+          setAiNotice({
+            type: 'success',
+            text: '✨ Keys connected! Pose Me is ready to suggest poses.',
+          });
+          setTimeout(() => setAiNotice(null), 3000);
+        }}
+      />
     </div>
   );
 };
